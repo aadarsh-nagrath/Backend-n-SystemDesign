@@ -1,0 +1,13 @@
+{
+  "name": "backend-system-design-notes-viewer",
+  "version": "1.0.0",
+  "description": "A lightweight Markdown notes viewer for Backend and System Design study notes",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "build": "node build-static.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
