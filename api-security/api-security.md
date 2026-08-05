@@ -1,388 +1,351 @@
-# Comprehensive Guide to API Security
+# API Security
 
-## Introduction
+APIs are the backbone of modern software — mobile apps, cloud integrations, service-to-service calls — and that makes them the default attack surface. Unlike a traditional web app where the server controls the whole UI, an API hands a contract straight to the client, and every endpoint is a door someone can knock on directly (no browser sandboxing, no UI to hide behind). Securing an API means covering authentication, authorization, input handling, transport, and operational visibility — not just "add a login."
 
-Application Programming Interfaces (APIs) are the backbone of modern software architectures, enabling seamless communication between applications, services, and devices. As organizations increasingly rely on APIs for everything from mobile apps to cloud integrations, the attack surface expands dramatically. In 2025, APIs are the top target for cybercriminals, with 99% of organizations experiencing at least one API security issue in the past year. Fraud and bot attacks pose major threats, with only 21% of organizations able to effectively mitigate bot traffic. Generative AI is expanding the API attack surface, introducing new vulnerabilities like prompt injection and AI-powered assaults.
+## TL;DR
+- Auth (who you are) and access control (what you can do) are different problems — solve both, separately.
+- Never hand-roll auth. Use OAuth 2.0/OIDC, JWT with proper validation, or vetted API-key schemes.
+- Validate everything coming in (method, content-type, body shape); reveal as little as possible going out (headers, error detail, object fields).
+- Rate limit and throttle every public endpoint — it's your cheapest defense against brute force and DoS.
+- The OWASP API Security Top 10 is the standard checklist — BOLA (broken object-level authorization) is consistently the #1 real-world API vulnerability.
+- Log and monitor centrally, but never log secrets, tokens, or full credentials.
 
-This guide provides a super-detailed, exhaustive coverage of API security, drawing from the provided roadmap image and expanding to include all angles—not just the basics, but advanced topics, emerging threats, real-world examples, code snippets, tools, compliance considerations, and future trends. It incorporates the OWASP API Security Top 10 (2023 edition, the latest as of 2025), REST security best practices, NIST DevSecOps guidelines, and 2025-specific insights like AI-driven threats and posture governance.
+## Threat modeling for APIs
 
-We'll structure this around the roadmap's sections while integrating additional concepts such as threat modeling, zero-trust architecture, API gateways, Web Application and API Protection (WAAP), compliance (e.g., GDPR, PCI-DSS), and serverless/GraphQL-specific security. Examples include code in Python (Flask), Node.js (Express), and Java (Spring Boot), with mitigations for common vulnerabilities.
+Before writing endpoint code, model the threats. Two common frameworks:
+- **STRIDE** — Spoofing, Tampering, Repudiation, Information Disclosure, Denial of Service, Elevation of Privilege. A checklist to run per endpoint.
+- **PASTA** (Process for Attack Simulation and Threat Analysis) — a more business-risk-driven flow: map the app, list threats, simulate attacks, assess impact.
 
-### Why API Security Matters in 2025
-- **Prevalence**: APIs now outnumber traditional web apps in attacks, with DDoS, brute force, and fraud leading incidents.
-- **Evolving Threats**: AI enables faster reconnaissance, anomaly detection evasion, and sophisticated attacks like API abuse for data scraping.
-- **Business Impact**: Breaches can lead to data exfiltration, financial loss (e.g., $70K hosting bills from misconfigurations), regulatory fines, and reputational damage.
-- **Best Practice Framework**: Adopt a "secure by design" approach, integrating security into DevSecOps pipelines.
+Practical steps:
+1. Map API flows — use your OpenAPI/Swagger spec as the source of truth for what exists.
+2. Identify entry points — every endpoint, every parameter, every header the server trusts.
+3. Assess risk against the OWASP API Top 10 (below).
+4. Prioritize with **DREAD** — Damage, Reproducibility, Exploitability, Affected users, Discoverability — to decide what to fix first.
 
-## Threat Modeling for APIs
+**Example**: for `/users/{id}/orders`, the obvious threat is IDOR/BOLA — can a logged-in user change `{id}` and see someone else's orders? Mitigate with a server-side ownership check on every request, not just at login.
 
-Before diving into specifics, conduct API threat modeling using methodologies like STRIDE (Spoofing, Tampering, Repudiation, Information Disclosure, Denial of Service, Elevation of Privilege) or PASTA (Process for Attack Simulation and Threat Analysis). Identify assets (e.g., data, endpoints), threats (e.g., injection), and mitigations early.
-
-- **Steps**:
-  1. Map API flows (e.g., using Swagger/OpenAPI specs).
-  2. Identify entry points (endpoints, parameters).
-  3. Assess risks based on OWASP Top 10.
-  4. Prioritize with DREAD (Damage, Reproducibility, Exploitability, Affected Users, Discoverability).
-- **Tools**: Microsoft Threat Modeling Tool, OWASP Threat Dragon.
-- **Example**: For a user API (/users/{id}), model threats like IDOR (Insecure Direct Object Reference) and mitigate with authorization checks.
+Tools: OWASP Threat Dragon, Microsoft Threat Modeling Tool.
 
 ## Authentication
 
-From the roadmap: Avoid 'Basic Authentication'; use standard (e.g., JWT). Do not reinvent the wheel in authentication mechanisms. Use Max Retry and jail features in Login. Use encryption on all sensitive data.
+Authentication answers "who are you." Get this wrong and you have OWASP **API2: Broken Authentication**.
 
-Authentication verifies "who you are." Weak auth leads to OWASP API2: Broken Authentication.
+**Rules of thumb:**
+- **Avoid Basic Auth** — credentials go over the wire base64-encoded (not encrypted) on every request; if TLS is ever misconfigured, it's a plaintext leak. Use token-based auth instead.
+- **Don't reinvent auth** — use OAuth 2.0/OIDC, or a maintained library. Auth bugs are subtle and attackers actively hunt for them; a custom scheme is a liability, not a feature.
+- **Rate-limit login attempts** — cap retries (e.g., 5 attempts) then lock the account temporarily ("jail"), to blunt brute force and credential stuffing.
+- **Encrypt sensitive data** — AES-256 for data at rest; hash passwords with bcrypt or Argon2 (never plain SHA-256 — it's too fast, making brute force cheap).
+- **MFA for sensitive operations** — TOTP or WebAuthn for anything high-value.
+- **Secure session cookies** — `HttpOnly`, `Secure`, `SameSite=Strict` if the API is stateful and cookie-backed.
+- **mTLS for machine-to-machine** — when both sides are services you control, mutual TLS gives strong bidirectional identity without a shared secret.
 
-### Best Practices
-- **Avoid Basic Auth**: It's vulnerable to interception; use token-based methods instead.
-- **Standard Mechanisms**: Prefer OAuth 2.0/OpenID Connect for delegated access, JWT for stateless auth, or API keys for public APIs.
-- **Rate Limiting on Logins**: Implement max retries (e.g., 5 attempts) and account lockouts (jail) to prevent brute force.
-- **Encryption**: Use AES-256 for sensitive data at rest; hash passwords with bcrypt/Argon2.
-- **Multi-Factor Authentication (MFA)**: Mandate for sensitive APIs; use TOTP or WebAuthn.
-- **Session Management**: For stateful APIs, use secure cookies (HttpOnly, Secure, SameSite=Strict).
-- **Certificate-Based Auth**: For machine-to-machine, use mTLS (mutual TLS).
+```javascript
+// Node.js login with hashed password + short-lived JWT
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
 
-### Examples
-- **Node.js with JWT**:
-  ```javascript
-  const jwt = require('jsonwebtoken');
-  const bcrypt = require('bcrypt');
+app.post('/login', async (req, res) => {
+  const { username, password } = req.body;
+  const user = await getUserByUsername(username);
+  if (user && await bcrypt.compare(password, user.hash)) {
+    const token = jwt.sign({ sub: user.id }, process.env.SECRET, { expiresIn: '1h' });
+    res.json({ token });
+  } else {
+    // Increment a per-account/per-IP failure counter here (rate limit)
+    res.status(401).send('Invalid credentials');
+  }
+});
+```
 
-  // Login endpoint
-  app.post('/login', async (req, res) => {
-    const { username, password } = req.body;
-    // Fetch user from DB, compare hash
-    if (await bcrypt.compare(password, user.hash)) {
-      const token = jwt.sign({ sub: user.id }, process.env.SECRET, { expiresIn: '1h' });
-      res.json({ token });
-    } else {
-      // Rate limit here, e.g., using express-rate-limit
-      res.status(401).send('Invalid credentials');
-    }
-  });
-  ```
-- **Mitigating Broken Auth**: Validate tokens on every request; revoke on logout via denylist.
+Validate the token on *every* protected request server-side — never trust a client's claim that it's authenticated. Support revocation (e.g., a denylist in Redis for tokens invalidated before their natural expiry, such as on logout or password change).
 
-### Additional Angles
-- **Biometric Auth**: For mobile APIs, integrate with device biometrics but fallback to PIN.
-- **Zero-Trust**: Assume no trust; verify every request regardless of network.
-- **Threats**: Credential stuffing, token hijacking. Mitigate with CAPTCHA on failures.
+Other angles: zero-trust ("verify every request regardless of network location, VPN, or prior auth"), credential stuffing defenses (CAPTCHA after repeated failures, breached-password checks), and biometric auth on mobile clients (with a PIN/password fallback — biometrics should never be the *only* factor a backend trusts blindly).
 
 ## JWT (JSON Web Tokens)
 
-From the roadmap: Use good JWT Secret to make brute force attacks difficult. Do not extract the algorithm from the header; use backend. Make token expiration (TTL) as short as possible. Avoid storing sensitive data in JWT payload. Keep the payload small to reduce the size of the JWT.
+JWTs are compact, signed (optionally encrypted) tokens for carrying claims between parties — the most common shape for stateless API auth. A JWT has three base64url segments: `header.payload.signature`.
 
-JWTs are compact, self-contained tokens for secure info exchange.
+**Rules that actually matter:**
+- **Strong secret / key** — 256-bit random for HMAC (HS256), or an RSA/EC keypair for RS256/ES256. A weak or guessable secret means anyone can forge tokens.
+- **Never trust the `alg` from the header** — a classic attack is sending a token with `"alg": "none"` or downgrading RS256 to HS256 (using the public key as an HMAC secret) to forge a valid-looking signature. The server must hardcode the expected algorithm and reject anything else, not read `alg` from the token and dispatch on it.
+- **Short TTL** — 15–60 minutes for access tokens; use a separate, revocable refresh token for longer sessions.
+- **No sensitive data in the payload** — the payload is base64-encoded, not encrypted; anyone can decode and read it. Keep PII out; stick to `sub`, `iss`, `aud`, `exp`, roles/scopes.
+- **Small payload** — every claim adds bytes to every request; keep it to what authorization checks actually need.
+- **Validate `iss`, `aud`, `exp`, `nbf`** server-side on every request — a token issued for a different audience or already expired must be rejected even if the signature is valid.
+- **Revocation** — JWTs are stateless by design, meaning you can't "delete" one; use a short TTL plus a denylist (Redis, keyed by `jti` or user-id) for tokens that need explicit invalidation (logout, compromised account).
 
-### Best Practices
-- **Strong Secrets**: Use 256-bit random secrets; rotate regularly.
-- **Algorithm Validation**: Hardcode HS256/RS256; ignore header 'alg' to prevent none/downgrade attacks.
-- **Short TTL**: Set to 15-60 minutes; use refresh tokens for longer sessions.
-- **No Sensitive Data**: Avoid PII in payload; use claims like 'sub', 'iss', 'aud', 'exp'.
-- **Small Payload**: Limit claims to essentials to minimize size and attack surface.
-- **Signature/MAC**: Prefer signatures over MACs unless all parties trust the key.
-- **Validation**: Check iss, aud, exp, nbf on server-side.
-- **Revocation**: Use denylists for explicit revocation (e.g., Redis for storage).
+```python
+from flask import Flask, jsonify
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+import datetime
 
-### Examples
-- **Python Flask with JWT**:
-  ```python
-  from flask import Flask, request, jsonify
-  from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
-  import datetime
+app = Flask(__name__)
+app.config['JWT_SECRET_KEY'] = 'super-secret'  # load from env/secret manager, not hardcoded
+jwt = JWTManager(app)
 
-  app = Flask(__name__)
-  app.config['JWT_SECRET_KEY'] = 'super-secret'  # Change to strong random
-  jwt = JWTManager(app)
+@app.route('/protected', methods=['GET'])
+@jwt_required()
+def protected():
+    return jsonify(logged_in_as=get_jwt_identity()), 200
 
-  @app.route('/protected', methods=['GET'])
-  @jwt_required()
-  def protected():
-      return jsonify(logged_in_as=get_jwt_identity()), 200
+access_token = create_access_token(identity='user', expires_delta=datetime.timedelta(minutes=15))
+```
 
-  # Create token with short TTL
-  access_token = create_access_token(identity='user', expires_delta=datetime.timedelta(minutes=15))
-  ```
-- **Common Vulnerabilities**: Algorithm confusion, weak keys. Mitigate by using libraries like PyJWT with strict validation.
+Use a well-audited library (PyJWT, `jsonwebtoken`, etc.) rather than parsing/verifying manually — algorithm-confusion and signature-stripping bugs are exactly the kind of thing these libraries have already hardened against. For encrypted payloads, JWTs have a JWE variant (vs. the signed-only JWS); combine with OAuth by using the JWT as the access/ID token format.
 
-### Additional Angles
-- **JWE/JWS**: Use JWE for encrypted payloads if needed.
-- **Integration with OAuth**: JWT as access tokens in OAuth flows.
+## Access control
 
-## Access Control
+Access control answers "what are you allowed to do" — a different question from authentication, and mixing them up is a common root cause of OWASP **API1 (BOLA)**, **API3 (broken object property auth)**, and **API5 (broken function-level auth)**.
 
-From the roadmap: Limit requests (throttling) to avoid DDoS/Brute Force. Use HTTPS on server side and secure ciphers. Use HSTS header with SSL to avoid SSL Strip attacks. Turn off directory listing. Private APIs to be only accessible from listed IPs.
+- **Rate limiting / throttling** — protects against brute force and DoS regardless of auth status. Token bucket or fixed/sliding window; apply per-IP and per-account.
+- **HTTPS everywhere, strong ciphers** — TLS 1.3 preferred, AES-GCM ciphers; see `https.md` and `ssl-tls.md` for the mechanics.
+- **HSTS** — forces browsers to use HTTPS on every subsequent visit, closing the window for SSL-stripping downgrade attacks.
+- **IP allowlisting for private/internal APIs** — restrict to known IP ranges or VPCs rather than exposing internal endpoints publicly.
+- **Disable directory listing** — an exposed file listing leaks structure and sometimes secrets (config files, backups).
+- **RBAC/ABAC** — Role-Based (fixed roles → permissions) or Attribute-Based (dynamic rules on user/resource/context attributes) access control, applied server-side on every request, not just at the UI layer.
+- **API gateways** for centralized enforcement (rate limits, auth, logging) — Kong, AWS API Gateway, Apigee.
 
-Access control enforces "what you can do," addressing OWASP API1, API3, API5.
+```javascript
+const rateLimit = require('express-rate-limit');
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100                  // limit each IP to 100 requests per window
+});
+app.use(limiter);
+```
 
-### Best Practices
-- **Rate Limiting/Throttling**: Prevent DDoS and brute force; use token buckets or fixed windows.
-- **HTTPS Everywhere**: Enforce TLS 1.3; use secure ciphers (e.g., AES-GCM); HSTS preload.
-- **IP Whitelisting**: For private APIs, restrict to known IPs/VPCs.
-- **Directory Listing Off**: Configure servers (e.g., Nginx 'autoindex off') to prevent exposure.
-- **RBAC/ABAC**: Role-Based (RBAC) or Attribute-Based (ABAC) for fine-grained control.
-- **CORS**: Set strict policies (e.g., allow specific origins).
-- **API Gateways**: Use for centralized control (e.g., AWS API Gateway, Kong).
+```nginx
+add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+```
 
-### Examples
-- **Express Rate Limiting**:
-  ```javascript
-  const rateLimit = require('express-rate-limit');
-  const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100 // limit each IP to 100 requests
-  });
-  app.use(limiter);
-  ```
-- **HSTS Header**:
-  ```nginx
-  add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
-  ```
+**BOLA/IDOR defense in practice**: don't rely on "the ID is hard to guess" (sequential integers are trivially enumerable — `GET /orders/1001`, `/orders/1002`, ...). Use UUIDs *and* still check server-side that the authenticated user owns/can access the requested object on every single request, not just at the route's outer auth check. This is the single most common real-world API vulnerability class — get it right.
 
-### Additional Angles
-- **Zero-Trust Network Access (ZTNA)**: Verify identity and context for every access.
-- **Service Mesh**: Use Istio for mTLS and policy enforcement in microservices.
-- **Threats**: BOLA (Broken Object Level Auth), BOPLA. Mitigate with UUIDs over sequential IDs.
+Zero-Trust Network Access (verify identity/context per-request, not per-network) and service meshes (Istio for mTLS + policy between microservices) extend this model to service-to-service traffic.
 
-## OAuth
+## OAuth 2.0
 
-From the roadmap: Always validate 'redirect_uri' on server-side. Avoid 'response_type=token' and try to exchange for code. Use 'state' parameter to prevent CSRF attacks. Have full-scope and validate scope for each application.
+OAuth 2.0 delegates authorization ("let app X act on my behalf with these permissions") without sharing the user's password; OpenID Connect (OIDC) layers identity (authentication) on top of it.
 
-OAuth 2.0 is for authorization delegation; OpenID Connect adds identity layer.
+- **Validate `redirect_uri` server-side** against a registered allowlist — never accept it as free-form input, or an attacker can redirect the auth code/token to their own server (open redirect → account takeover).
+- **Use the Authorization Code flow, not Implicit** (`response_type=token`) — the implicit flow returns the access token directly in the URL fragment, exposed to browser history, referrer leaks, and any script on the page. Authorization Code exchanges a short-lived code for a token server-side, keeping the token out of the browser's URL.
+- **`state` parameter** — a random, unguessable value tied to the user's session, checked on callback, to prevent CSRF against the OAuth flow itself (an attacker tricking a victim into linking the attacker's account).
+- **PKCE (Proof Key for Code Exchange)** — mandatory for public clients (SPAs, mobile apps) that can't keep a client secret; binds the authorization code to the client that requested it, blocking code-interception attacks.
+- **Scopes** — request and grant the minimum needed (`read:users`, not `admin:*`); validate scope on every resource server call, not just at token issuance.
+- **Token introspection** — resource servers validate opaque tokens by calling back to the authorization server rather than trusting them blindly.
 
-### Best Practices
-- **Redirect URI Validation**: Register and validate URIs to prevent open redirects.
-- **Authorization Code Flow**: Prefer over implicit (token) for security; exchange code for token server-side.
-- **State Parameter**: Use random state to mitigate CSRF.
-- **Scopes**: Define minimal scopes (e.g., read:users); validate per app/client.
-- **PKCE**: Mandate for public clients to prevent code interception.
-- **Token Introspection**: Validate tokens via introspection endpoint.
+```java
+@Configuration
+public class SecurityConfig extends WebSecurityConfigurerAdapter {
+    @Override
+    protected void configure(HttpSecurity http) throws Exception {
+        http.oauth2Login()
+            .authorizationEndpoint()
+            .authorizationRequestResolver(new CustomAuthorizationRequestResolver(clientRegistrationRepository()));
+    }
+}
+```
 
-### Examples
-- **Java Spring Boot OAuth Client**:
-  ```java
-  @Configuration
-  public class SecurityConfig extends WebSecurityConfigurerAdapter {
-      @Override
-      protected void configure(HttpSecurity http) throws Exception {
-          http.oauth2Login()
-              .authorizationEndpoint()
-              .authorizationRequestResolver(new CustomAuthorizationRequestResolver(clientRegistrationRepository()));
-      }
-  }
-  ```
-- **State Usage**: Generate random state, include in auth request, verify on callback.
+Threats: redirect URI manipulation, authorization code interception/replay (mitigated by PKCE), and scope creep (an app silently accumulating broader access than it needs).
 
-### Additional Angles
-- **OAuth for APIs**: Use bearer tokens; combine with JWT.
-- **Threats**: Redirect manipulation, code injection. Mitigate with strict validation.
+## Input processing
 
-## Input Processing
+Bad input handling is the root of OWASP **API7 (SSRF)** and classic injection attacks.
 
-From the roadmap: Use proper HTTP methods for the operation. Validate content-type on request header. Validate user input to avoid common vulnerabilities. Use standard Authorization header for sensitive data. Use only server-side encryption. Use an API Gateway for caching, Rate Limit policies etc.
+- **Restrict HTTP methods** to what the operation actually needs — reject anything else with `405 Method Not Allowed`.
+- **Validate `Content-Type`** — reject requests whose declared type doesn't match what the endpoint expects (`application/json` expected but `text/plain` sent, etc.) rather than trying to parse anyway.
+- **Sanitize/validate all input** — type, length, format, allowed character set. Use a schema validation library (Joi in Node, Pydantic in Python, Hibernate Validator in Java) rather than ad hoc checks scattered through handler code.
+- **`Authorization` header for credentials** — not custom headers or query strings (query strings end up in server logs, browser history, referrer headers).
+- **Server-side encryption** — encrypt sensitive fields before they hit storage, don't rely on disk/transport encryption alone.
+- **API gateway** for centralized rate limiting, caching, and WAF rules, so every service behind it inherits the same baseline.
+- **File uploads** — route through a CDN/object store (S3 presigned URLs) rather than the app server; scan for malware; cap size; validate file type by content, not just extension.
 
-Input validation prevents OWASP API7: SSRF, injection attacks.
+```python
+from pydantic import BaseModel, Field
 
-### Best Practices
-- **HTTP Methods**: Restrict to allowed (e.g., GET for read); reject others with 405.
-- **Content-Type Validation**: Enforce expected types (e.g., application/json); reject mismatches.
-- **Input Sanitization**: Validate length, type, format; use libraries like Joi (JS), Hibernate Validator (Java).
-- **Auth Header**: Use Bearer for tokens.
-- **Server-Side Encryption**: Encrypt data before storage.
-- **API Gateway**: Centralize rate limiting, caching, WAF.
-- **File Uploads**: Use CDN; scan for malware; limit size.
+class User(BaseModel):
+    name: str
+    age: int = Field(gt=0)
 
-### Examples
-- **Python Input Validation**:
-  ```python
-  from pydantic import BaseModel
+@app.post("/users")
+def create_user(user: User):
+    # Pydantic validates types/constraints before this line ever runs
+    return user
+```
 
-  class User(BaseModel):
-      name: str
-      age: int = Field(gt=0)
+```javascript
+app.use((req, res, next) => {
+  if (!['GET', 'POST'].includes(req.method)) return res.status(405).send();
+  next();
+});
+```
 
-  @app.post("/users")
-  def create_user(user: User):
-      # Auto-validates input
-      return user
-  ```
-- **Restrict Methods**:
-  ```javascript
-  app.use((req, res, next) => {
-    if (!['GET', 'POST'].includes(req.method)) return res.status(405).send();
-    next();
-  });
-  ```
-
-### Additional Angles
-- **XXE/XML Attacks**: Disable entity parsing in XML parsers.
-- **Deserialization**: Use safe libraries (e.g., Jackson with deny lists).
-- **Threats**: SQL/NoSQL injection, command injection. Mitigate with prepared statements.
+- **XXE (XML External Entity)** — disable external entity resolution in any XML parser; a permissive parser lets an attacker read local files or trigger SSRF via a crafted `<!ENTITY>`.
+- **Insecure deserialization** — use allowlist-based (de)serializers (e.g., Jackson configured with a type deny/allow list) rather than generic object deserialization, which can be abused to instantiate arbitrary classes.
+- **SQL/NoSQL/command injection** — always use parameterized queries/prepared statements; never string-concatenate user input into a query or shell command.
 
 ## Processing
 
-From the roadmap: Check if the endpoints are protected behind authentication. Avoid broken authentication process. Avoid user's personal ID in the resource URLs e.g. /users/242/orders. Prefer using UUID over auto-increment IDs to avoid XXE attacks. Disable entity parsing if using XML, YAML, or any other language. Use CDN for file uploads. Avoid HTTP blocking if you are using huge amount of data. Make sure to turn the debug mode off in production. Use non-executable stacks when available.
+Covers server-side execution hygiene — largely OWASP **API8: Security Misconfiguration**.
 
-Processing ensures secure execution, addressing OWASP API8: Security Misconfiguration.
+- **Auth-gate every non-public endpoint** — including internal/admin/debug routes that "shouldn't" be reachable; misconfiguration, not missing code, is usually the cause of exposure.
+- **Don't expose internal IDs in URLs** (`/users/242/orders` leaks a sequential user ID) — prefer UUIDs, which are also non-enumerable.
+- **Disable XML/YAML entity parsing** where not needed (see XXE above).
+- **CDN for uploads** rather than serving user-provided files directly from the app server.
+- **Async processing for large payloads** — offload to a queue (RabbitMQ, SQS) instead of blocking a request thread, which both improves resilience and avoids one large upload starving other requests.
+- **Debug mode off in production** — verbose stack traces and debug endpoints leak internals (file paths, framework versions, sometimes secrets).
+- **Non-executable stacks** where the OS/compiler supports it, as defense-in-depth against buffer-overflow style exploits.
+- **Generic error messages externally**, detailed errors only in internal logs.
 
-### Best Practices
-- **Protected Endpoints**: Require auth for all non-public.
-- **ID Obfuscation**: Use UUIDs to prevent enumeration.
-- **Entity Parsing**: Disable in parsers to avoid XXE.
-- **CDN for Uploads**: Offload to S3/CDN with presigned URLs.
-- **Async Processing**: For large data, use queues (e.g., RabbitMQ) to avoid blocking.
-- **Debug Off**: Set environment vars (e.g., NODE_ENV=production).
-- **Non-Exec Stacks**: Enable in OS/compilers to prevent buffer overflows.
-- **Error Handling**: Avoid verbose errors; return generic messages.
+```java
+@Entity
+public class Order {
+    @Id
+    @GeneratedValue(generator = "uuid2")
+    @GenericGenerator(name = "uuid2", strategy = "uuid2")
+    private UUID id;
+}
+```
 
-### Examples
-- **UUID in Spring Boot**:
-  ```java
-  @Entity
-  public class Order {
-      @Id
-      @GeneratedValue(generator = "uuid2")
-      @GenericGenerator(name = "uuid2", strategy = "uuid2")
-      private UUID id;
-  }
-  ```
-- **Debug Mode Off**:
-  ```python
-  app.run(debug=False)
-  ```
+```python
+app.run(debug=False)
+```
 
-### Additional Angles
-- **Dependency Scanning**: Check for vuln deps (e.g., OWASP Dependency-Check).
-- **Container Security**: Scan images; use least privilege.
+Also worth automating: dependency vulnerability scanning (OWASP Dependency-Check, Snyk) and container image scanning with least-privilege runtime settings.
 
 ## Output
 
-From the roadmap: Send X-Content-Type-Options: nosniff header. Send X-Frame-Options: deny header. Send Content-Security-Policy: default-src 'none' header. Remove fingerprinting headers (i.e. x-powered-by) etc. Force 'content-type' for your response. Avoid returning sensitive data (credentials, sec. tokens etc). Remove proper response as per the operation.
+Prevents client-side attacks (XSS, clickjacking, MIME confusion) and data leakage from responses.
 
-Output security prevents client-side attacks like XSS.
+- **`X-Content-Type-Options: nosniff`** — stops browsers from guessing (sniffing) a different content type than declared, which can turn a file upload into executable script in some legacy scenarios.
+- **`X-Frame-Options: DENY`** (or CSP `frame-ancestors 'none'`) — prevents the response being framed by another site (clickjacking).
+- **`Content-Security-Policy: default-src 'none'`** for pure API responses — an API returning JSON has no legitimate need to load scripts/styles/images, so lock it down entirely. See `csp-owasp-server-security.md` for full CSP directive coverage.
+- **Remove fingerprinting headers** — `X-Powered-By`, server version banners — these hand attackers a shortlist of known CVEs to try.
+- **Force the `Content-Type`** on responses explicitly rather than letting the framework guess.
+- **Never return sensitive fields** — password hashes, internal tokens, other users' PII — filter/redact at the serialization layer, not by hoping the frontend won't display them.
+- **Correct status codes** — `204` for no-content success, `403` vs `404` deliberately (see the BOLA note below) — inconsistency itself can leak information.
 
-### Best Practices
-- **Security Headers**: Add via middleware (e.g., Helmet in Express).
-- **Content-Type Enforcement**: Set explicitly to prevent MIME sniffing.
-- **No Sensitive Data**: Filter responses; use redaction.
-- **Proper Responses**: Use correct status codes (e.g., 204 for no content).
+```javascript
+const helmet = require('helmet');
+app.use(helmet());
+// Adds X-Content-Type-Options, X-Frame-Options, a baseline CSP, etc.
+```
 
-### Examples
-- **Express Helmet**:
-  ```javascript
-  const helmet = require('helmet');
-  app.use(helmet());
-  // Adds X-Content-Type-Options, X-Frame-Options, CSP, etc.
-  ```
-- **Filter Response**:
-  ```python
-  def get_user(id):
-      user = fetch_user(id)
-      return {k: v for k, v in user.items() if k != 'password'}
-  ```
+```python
+def get_user(id):
+    user = fetch_user(id)
+    return {k: v for k, v in user.items() if k != 'password'}
+```
 
-### Additional Angles
-- **CORS Headers**: Set minimally.
-- **Threats**: Data leakage. Mitigate with DLP (Data Loss Prevention).
+CORS headers belong here too — set them as narrowly as the client actually needs (see `cors.md`). A `403 Forbidden` vs `404 Not Found` distinction on an authorization failure is itself a minor information leak (it confirms the resource exists); some APIs deliberately return `404` for both "doesn't exist" and "exists but you can't see it" to avoid enumerating valid IDs to unauthorized callers.
 
-## CI & CD
+## CI/CD and dependency hygiene
 
-From the roadmap: Audit your design and implementation with unit/integration tests. Use a code review process and disregard self-approval. Continuously run security analysis on your code. Check your dependencies for known vulnerabilities. Design a rollback solution for deployments.
+Security has to be a pipeline stage, not a pre-launch checklist.
 
-Integrate security in DevSecOps.
+- **Automated tests** — unit tests for auth logic, integration tests for full request flows; run API-focused scanners like OWASP ZAP against a staging environment.
+- **Mandatory code review** — no self-approval, even for "small" changes; a second set of eyes catches logic-level auth bugs that tests miss.
+- **SAST/DAST/SCA in the pipeline** — static analysis (SonarQube), dynamic analysis, and software composition analysis (Snyk) run automatically on every push, not manually before releases.
+- **Automated dependency scanning** — Dependabot, Trivy, or similar catching known-CVE dependencies before they merge.
+- **Rollback plan** — blue-green deploys or feature flags so a bad security-relevant change can be reverted in seconds, not hours.
 
-### Best Practices
-- **Testing**: Unit for auth, integration for end-to-end; use OWASP ZAP for API scans.
-- **Code Reviews**: Mandate peer reviews; no self-merges.
-- **SAST/DAST/SCA**: Tools like SonarQube, Snyk in pipelines.
-- **Dependency Checks**: Automate with Dependabot or Trivy.
-- **Rollback**: Use blue-green deployments or feature flags.
-- **Pipelines**: Separate for code, IaC, policies.
+```yaml
+name: Security Scan
+on: [push]
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: snyk/actions/node@master
+        with: { command: test }
+```
 
-### Examples
-- **GitHub Actions SAST**:
-  ```yaml
-  name: Security Scan
-  on: [push]
-  jobs:
-    scan:
-      runs-on: ubuntu-latest
-      steps:
-        - uses: actions/checkout@v2
-        - uses: snyk/actions/node@master
-          with: { command: test }
-  ```
-
-### Additional Angles
-- **Shift-Left**: Embed security early.
-- **Compliance Gates**: Block deploys if scans fail.
+Shift security left — catching a broken-auth bug in code review is orders of magnitude cheaper than catching it in production. Gate deploys on scan results rather than treating them as advisory.
 
 ## Monitoring
 
-From the roadmap: Use centralized logs for all services and components. Use agents to monitor all requests, responses and errors. Use alerts for SMS, Slack, Email, Kibana, Cloudwatch, etc. Ensure that you aren't logging any sensitive data. Use an IDS and/or IPS system to monitor everything.
+Detection is what catches OWASP **API9 (Improper Inventory Management)** and everything else that slips past prevention.
 
-Monitoring detects anomalies, addressing OWASP API9: Improper Inventory Management.
+- **Centralized logging** — ELK stack, Splunk, or similar; log requests/responses/errors from every service in one place, correlated by request ID.
+- **Instrumentation** — OpenTelemetry traces/metrics across services so a slow or failing request can be traced end-to-end.
+- **Alerting** — thresholds on suspicious patterns (a spike in `401`s, unusual request volume from one IP) routed to Slack/email/PagerDuty.
+- **Never log secrets** — tokens, passwords, full credit card numbers, or raw PII; mask/redact at the logging layer, and treat this as a compliance requirement (GDPR) as much as a security one.
+- **IDS/IPS or WAAP** — Snort or a Web App and API Protection layer for runtime intrusion detection.
+- **Continuous API inventory/discovery** — shadow APIs (deployed but undocumented) and zombie APIs (deprecated but still reachable) are a top real-world source of breaches precisely because nobody's watching them; automated discovery tools catch what documentation misses.
 
-### Best Practices
-- **Centralized Logging**: Use ELK Stack or Splunk; log requests/responses sans sensitive data.
-- **Agents**: Instrument with OpenTelemetry for traces/metrics.
-- **Alerts**: Set thresholds (e.g., spike in 401s) for notifications.
-- **No Sensitive Logs**: Mask PII; comply with GDPR.
-- **IDS/IPS**: Use Snort or WAAP for intrusion detection.
-- **API Discovery**: Continuously inventory APIs to shadow/rogue ones.
-
-### Examples
-- **Python Logging**:
-  ```python
-  import logging
-  logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
-  logging.info('Request: %s', request.path)  # No sensitive data
-  ```
-
-### Additional Angles
-- **AI Monitoring**: Use ML for anomaly detection.
-- **Incident Response**: Define playbooks for API breaches.
+```python
+import logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+logging.info('Request: %s', request.path)  # never log body/headers with secrets
+```
 
 ## OWASP API Security Top 10 (2023)
 
-Detailed coverage of each risk:
+This is the standard reference for API-specific risk — distinct from the general OWASP Top 10 (which is web-app focused). Each entry below is a real, common vulnerability class with concrete cause and fix, not just a name.
 
-1. **API1: Broken Object Level Authorization (BOLA/IDOR)**: Exposing object IDs allows unauthorized access. Mitigation: Check authz for every object; use unpredictable IDs like UUIDs.
+1. **API1: Broken Object Level Authorization (BOLA / IDOR)**
+   The most common and most damaging API vulnerability. An endpoint takes an object ID (`GET /orders/{id}`) and returns data without verifying the *authenticated* caller actually owns or is permitted to see that object — only that *some* valid token was presented. An attacker just increments or guesses IDs to pull other users' data.
+   **Fix**: enforce an ownership/permission check on every object access, every single request — not once at login, not just at the route level. Prefer UUIDs over sequential IDs to make guessing harder (defense-in-depth, not a substitute for the authz check).
 
-2. **API2: Broken Authentication**: Weak auth mechanisms. Mitigation: Strong creds, MFA, token validation.
+2. **API2: Broken Authentication**
+   Weak, missing, or bypassable authentication — think reusable/never-expiring tokens, weak password policies, no brute-force protection, or JWT validation flaws (accepting `alg: none`, not checking `exp`).
+   **Fix**: standard OAuth2/OIDC flows, strong credential storage (bcrypt/Argon2), MFA on sensitive operations, rate-limited login endpoints, and strict token validation (signature, expiry, issuer, audience) on every request.
 
-3. **API3: Broken Object Property Level Authorization**: Overexposing properties. Mitigation: Filter outputs; RBAC on fields.
+3. **API3: Broken Object Property Level Authorization**
+   Related to BOLA but at the *field* level: an endpoint correctly checks the user can see the object, but returns (or accepts updates to) properties they shouldn't touch — e.g., a `PATCH /users/me` that lets a normal user set their own `role: admin` field because the endpoint blindly accepts whatever JSON keys are sent (mass assignment), or a response that includes an internal `is_flagged_fraud` field never meant for the client.
+   **Fix**: explicit allowlists for both readable and writable fields per role — never bind request bodies directly onto internal models.
 
-4. **API4: Unrestricted Resource Consumption**: Leading to DoS. Mitigation: Rate limits, resource quotas.
+4. **API4: Unrestricted Resource Consumption**
+   No limits on request size, rate, or resource-intensive operations (large file uploads, expensive search queries, pagination with no max page size) lets a single client exhaust CPU, memory, or third-party API quota/cost.
+   **Fix**: rate limiting, request size caps, pagination limits, and timeouts on expensive operations; consider cost-based throttling for endpoints that call metered third-party services.
 
-5. **API5: Broken Function Level Authorization**: Missing checks on functions. Mitigation: RBAC per endpoint/method.
+5. **API5: Broken Function Level Authorization**
+   Object-level checks might be fine, but the *endpoint itself* isn't protected — e.g., an admin-only `DELETE /users/{id}` endpoint exists and works for any authenticated user because nobody checks role before executing it, only that a valid token was sent.
+   **Fix**: RBAC/ABAC enforced centrally (middleware/gateway) per endpoint and HTTP method, "deny by default," tested explicitly for privilege escalation (can a normal-role token call an admin-role endpoint?).
 
-6. **API6: Unrestricted Access to Sensitive Business Flows**: E.g., buying items without limits. Mitigation: Business logic checks, CAPTCHA.
+6. **API6: Unrestricted Access to Sensitive Business Flows**
+   The API works exactly as designed, but the business logic itself can be abused at scale — e.g., no limit on how many times a user can apply a discount code, or a ticket-purchasing API with no bot/rate protection that lets scalpers buy out inventory in seconds.
+   **Fix**: identify sensitive flows during threat modeling (not just technical checks); apply CAPTCHA, device fingerprinting, or business-rule limits (e.g., "one redemption per account") specifically to those flows.
 
-7. **API7: Server-Side Request Forgery (SSRF)**: Tricking server to request internal resources. Mitigation: Validate/allowlist URLs.
+7. **API7: Server-Side Request Forgery (SSRF)**
+   Any endpoint that fetches a URL supplied (directly or indirectly) by the client — webhook registration, "import from URL," image proxies — can be tricked into making the *server* issue requests to internal-only resources (`http://169.254.169.254/` cloud metadata endpoints, internal admin panels) that the attacker couldn't reach directly.
+   **Fix**: allowlist permitted destination hosts/schemes, block requests to private/link-local IP ranges, and don't follow redirects blindly (a redirect can retarget an allowlisted URL to an internal one).
 
-8. **API8: Security Misconfiguration**: Default creds, verbose errors. Mitigation: Harden configs, automate checks.
+8. **API8: Security Misconfiguration**
+   The broadest category: default credentials left in place, verbose stack traces in production, unnecessary HTTP methods enabled, permissive CORS, missing security headers, outdated software with known CVEs, cloud storage buckets left public.
+   **Fix**: hardened, version-controlled configuration; automated config auditing (CIS benchmarks); disable debug mode and defaults before shipping; consistent config across all environments.
 
-9. **API9: Improper Inventory Management**: Undocumented APIs. Mitigation: Auto-discovery, versioning.
+9. **API9: Improper Inventory Management**
+   Old API versions (`/v1/users` still live after `/v2` shipped), staging/test endpoints reachable from the internet, or endpoints entirely undocumented and unknown to the security team — attackers actively scan for exactly this kind of forgotten surface, and it's often less hardened than the current, documented API.
+   **Fix**: maintain a live API inventory (auto-generated from OpenAPI specs where possible), deprecate and actually remove old versions, and never expose non-production environments publicly.
 
-10. **API10: Unsafe Consumption of APIs**: Trusting third-party APIs. Mitigation: Validate inputs from externals, use gateways.
+10. **API10: Unsafe Consumption of APIs**
+    Trusting data or behavior from third-party/upstream APIs without validation — assuming a partner API's response is well-formed and safe just because it's "internal" or "trusted," which can propagate injection payloads or malformed data into your own system.
+    **Fix**: validate and sanitize responses from external APIs exactly as you would client input; apply timeouts, circuit breakers, and allowlisted redirect handling to any outbound API integration.
 
-Examples and mitigations from Salt Security and Cloudflare.
+## Advanced topics
 
-## Advanced Topics
+- **API posture governance** — structured, ongoing management of the API lifecycle (design → deploy → deprecate) rather than one-time security review; tools like Traceable specialize in this.
+- **GraphQL-specific security** — a single flexible endpoint changes the threat model: enforce query depth/complexity limits (a deeply nested query can be a DoS vector), disable introspection in production, and rate-limit by query cost rather than just request count.
+- **Serverless APIs** — least-privilege IAM roles per function (a function should only have the exact permissions it needs, not a shared broad role), and monitor invocation patterns for anomalies since traditional network-perimeter monitoring doesn't apply.
+- **AI/ML-backed APIs** — validate inputs rigorously against prompt injection when an endpoint forwards user input to an LLM; treat model output as untrusted input to whatever consumes it next, not as safe-by-construction.
+- **Compliance** — PCI-DSS mandates encryption of card data in transit and at rest; GDPR requires minimizing and anonymizing logged personal data, with a lawful basis for processing.
+- **WAAP/WAF** — a Web App and API Protection layer in front of the API for runtime blocking of known attack patterns, complementing (not replacing) in-app fixes.
 
-- **API Posture Governance**: Structured management of API lifecycle; use tools like Traceable.
-- **GraphQL Security**: Prevent over-fetching with depth limits, rate limiting queries.
-- **Serverless APIs**: Secure functions (e.g., AWS Lambda) with IAM roles; monitor invocations.
-- **AI/ML APIs**: Protect against prompt injection; validate inputs rigorously.
-- **Compliance**: For PCI-DSS, encrypt card data; for GDPR, anonymize logs.
-- **WAAP/WAF**: Deploy for runtime protection against OWASP threats.
-- **eBPF for Security**: Kernel-level policy enforcement for advanced threat detection.
-
-## Tools and Resources
+## Tools and resources
 
 - **Testing**: Postman, Burp Suite, OWASP ZAP.
-- **Gateways**: Kong, Apigee.
-- **Monitoring**: Datadog, New Relic.
-- **Recommended Resources**: OWASP API Security Project, NIST SP 800-204C, REST Cheat Sheet.
+- **Gateways**: Kong, Apigee, AWS API Gateway.
+- **Monitoring**: Datadog, New Relic, ELK/Splunk.
+- **Reference material**: OWASP API Security Project (Top 10 + cheat sheets), NIST SP 800-204C, OWASP REST Security Cheat Sheet.
 
-This guide equips you to build secure APIs from ground up. Implement iteratively, audit regularly, and stay updated on threats.
+## Quick reference
+
+| Layer | Key controls |
+|---|---|
+| Authentication | OAuth2/OIDC or JWT, MFA, bcrypt/Argon2, rate-limited login |
+| Authorization | Per-object + per-function checks on every request, RBAC/ABAC, deny by default |
+| Input | Schema validation, method/content-type restriction, parameterized queries |
+| Output | Security headers (Helmet/CSP), field allowlisting, generic errors |
+| Transport | TLS 1.3, HSTS, mTLS for service-to-service |
+| Operations | Centralized logging (no secrets), rate limiting, dependency scanning, API inventory |

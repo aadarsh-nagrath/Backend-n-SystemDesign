@@ -1,45 +1,43 @@
-## Nginx: A Comprehensive Guide for Backend Engineers
+# Nginx
 
-Nginx is a high‑performance, event‑driven web server and reverse proxy designed for low memory usage and extreme concurrency. It excels at serving static files, acting as an HTTP/HTTPS reverse proxy and load balancer, terminating TLS, proxying WebSockets/gRPC, and sitting in front of application servers (Node.js, Python, Ruby, Go, PHP‑FPM).
+A high-performance, event-driven web server and reverse proxy built for low memory usage and extreme concurrency. It serves static files, terminates TLS, proxies HTTP/WebSockets/gRPC, load-balances across app servers (Node.js, Python, Ruby, Go, PHP-FPM), and commonly sits as an ingress/sidecar in container and Kubernetes environments.
 
-### Key Characteristics
-- **Event-driven, non-blocking I/O**: Scales to hundreds of thousands of connections with low memory.
-- **Master/worker architecture**: One master process manages multiple worker processes.
-- **Modular configuration**: Clear separation via contexts: `main`, `events`, `http`, `server`, `location`, `upstream`, `stream`.
-- **Reverse proxy and load balancer**: `proxy_pass` and `upstream` support multiple algorithms.
-- **TLS termination and HTTP/2/3**: Handles certificates, ALPN, HSTS; HTTP/3 requires QUIC build.
+## TL;DR
+- Event-driven, non-blocking I/O — one master process + a small number of worker processes handle huge connection counts with low memory, unlike Apache's process/thread-per-connection model.
+- Config is a nested block structure: `main` → `events` → `http` → `server` → `location`, plus `upstream` for load-balancing pools and `stream` for raw TCP/UDP.
+- Core jobs: reverse proxy, load balancer, TLS termination, static file server, cache layer, protocol upgrader (WebSocket/gRPC/HTTP2/HTTP3).
+- No `.htaccess` — all config is centralized, which is faster and more auditable but less flexible per-directory than Apache.
+- Reload config without dropping connections: `nginx -t && nginx -s reload`.
 
-### When to Use Nginx
-- As a front proxy terminating TLS and forwarding to app servers
-- For static content and asset caching
-- For load balancing across multiple application instances
-- For protocol upgrades: WebSocket, gRPC, HTTP/2, (optionally) HTTP/3/QUIC
-- As a sidecar or ingress in container/K8s environments
+## Where nginx fits: reverse proxy vs load balancer vs API gateway
 
----
+These three terms get used interchangeably but describe different responsibilities. Nginx can play any of these roles — sometimes all three in the same config — which is exactly why they get conflated.
 
-### Installation
-- Ubuntu/Debian:
+- **Reverse proxy**: sits in front of one or more backend servers and forwards client requests to them, returning the response as if it served it itself. The core mechanism is just `proxy_pass`. Nginx-as-reverse-proxy is about *where the request goes* — hiding backend topology, terminating TLS, handling protocol upgrades.
+- **Load balancer**: a reverse proxy with more than one backend and a policy for picking which one gets each request (`round_robin`, `least_conn`, `ip_hash`, etc.), typically with health checks to route around dead nodes. Every load balancer is a reverse proxy; not every reverse proxy is load-balancing (a single-backend `proxy_pass` isn't).
+- **API gateway**: a reverse proxy/load balancer with an application-aware layer on top — authentication/authorization, per-client rate limiting, request/response transformation, routing by API version or tenant, aggregating multiple backend calls into one response, protocol translation (REST-to-gRPC), and centralized API analytics. Nginx *can* do a lot of this (rate limiting, auth via `auth_request`, header rewriting) but dedicated gateways (Kong, Envoy, AWS API Gateway, Apigee) build the application/business logic in as first-class features rather than assembled from lower-level directives.
+
+Rule of thumb: if the concern is "get this request to a healthy backend efficiently," you're doing reverse-proxying/load-balancing — nginx is a natural fit and is what most people mean by "nginx in front of my app." If the concern is "enforce API contracts, quotas, and auth policy across many services owned by different teams," you're in API-gateway territory — nginx can approximate it for simple cases, but a purpose-built gateway (or nginx plus a module like `njs`/OpenResty, or NGINX Plus) pays off once the policy surface grows. In practice, many architectures layer them: `client → API gateway (authn, quotas, routing) → nginx (TLS termination, LB, caching) → app servers`.
+
+## Installation
+
 ```bash
+# Ubuntu/Debian
 sudo apt update && sudo apt install -y nginx
-```
-- RHEL/CentOS/Rocky/Alma:
-```bash
+
+# RHEL/CentOS/Rocky/Alma
 sudo dnf install -y nginx
-```
-- macOS (Homebrew):
-```bash
+
+# macOS (Homebrew)
 brew install nginx
 brew services start nginx
 ```
-- Validate:
+
+Validate and control via systemd:
 ```bash
 nginx -v
-nginx -t
-```
+nginx -t                          # test config syntax
 
-Systemd operations:
-```bash
 sudo systemctl enable nginx
 sudo systemctl start nginx
 sudo systemctl reload nginx
@@ -48,23 +46,27 @@ sudo systemctl status nginx | cat
 
 Directory layout (Debian/Ubuntu):
 - `nginx.conf` at `/etc/nginx/nginx.conf`
-- Site configs under `/etc/nginx/sites-available/` and symlinks to `/etc/nginx/sites-enabled/`
-- Global snippets `/etc/nginx/snippets/`
+- Site configs under `/etc/nginx/sites-available/`, symlinked into `/etc/nginx/sites-enabled/`
+- Global snippets in `/etc/nginx/snippets/`
 - Logs in `/var/log/nginx/`
 
----
+## Architecture and core concepts
 
-### Architecture and Core Concepts
-- **Master process**: reads config, binds ports, spawns workers, handles reloads.
-- **Workers**: handle connections using epoll/kqueue.
-- **Contexts**:
-  - `main` (global), `events` (worker/connection settings), `http` (HTTP server), `server` (virtual hosts), `location` (path-based routing), `upstream` (LB pools), `stream` (TCP/UDP L4 proxy).
-- **Phases**: Nginx processes requests in phases (rewrite, access, content, log). Directives apply in specific phases.
+- **Master process** — reads config, binds ports, spawns workers, handles reloads.
+- **Worker processes** — handle connections using epoll (Linux) / kqueue (BSD/macOS), each capable of managing thousands of simultaneous connections via non-blocking I/O.
+- **Contexts** (config blocks, nested):
+  - `main` — global settings (user, worker count, PID file).
+  - `events` — worker/connection tuning (`worker_connections`, `multi_accept`).
+  - `http` — HTTP server settings shared across virtual hosts.
+  - `server` — a virtual host (one `server_name` + `listen` combination).
+  - `location` — path-based routing within a server block.
+  - `upstream` — named pool of backend servers for load balancing.
+  - `stream` — raw TCP/UDP (Layer 4) proxying, outside the `http` context.
+- **Phases** — nginx processes each request through ordered phases (rewrite, access, content, log); directives only apply within their phase, which is why some directive combinations behave unexpectedly (e.g. `if` inside `location` interacting oddly with `try_files`).
 
----
+## 🟢 Beginner: basic reverse proxy and static files
 
-### Minimal HTTP Reverse Proxy Example
-Create `/etc/nginx/sites-available/app.conf`:
+Minimal reverse proxy — `/etc/nginx/sites-available/app.conf`:
 ```nginx
 server {
     listen 80;
@@ -85,9 +87,9 @@ sudo ln -s /etc/nginx/sites-available/app.conf /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
----
+The `proxy_set_header` lines matter more than they look: without them, the backend sees every request as coming from `127.0.0.1` with `Host: 127.0.0.1`, breaking anything that depends on the real client IP or the original hostname (redirects, logging, rate limiting by IP).
 
-### Static Files and SPA Fallback
+Static files with SPA fallback and cache headers for assets:
 ```nginx
 server {
     listen 80;
@@ -96,7 +98,7 @@ server {
     index index.html;
 
     location / {
-        try_files $uri $uri/ /index.html;  # SPA fallback
+        try_files $uri $uri/ /index.html;  # SPA fallback: unknown paths go to index.html
     }
 
     location ~* \.(jpg|jpeg|png|gif|svg|css|js|woff2?)$ {
@@ -105,11 +107,13 @@ server {
     }
 }
 ```
+`try_files` checks each argument in order and serves the first that exists on disk — the SPA fallback pattern (`$uri $uri/ /index.html`) is what lets client-side routers (React Router, Vue Router) handle deep links without 404s.
 
----
+## 🟡 Intermediate: load balancing, protocol upgrades, TLS, caching
 
-### Load Balancing
-Supported methods: `round_robin` (default), `least_conn`, `ip_hash`, `hash`, `random` (with two least_conn), health checks (basic by default; advanced with NGINX Plus) and circuit breaker patterns via fail_timeout/max_fails.
+### Load balancing
+
+Built-in algorithms: `round_robin` (default, no directive needed), `least_conn`, `ip_hash`, `hash` (with a key), and `random` (optionally with two-choice least-conn). Health checking is passive by default (`max_fails`/`fail_timeout`); active health checks require NGINX Plus.
 
 ```nginx
 upstream app_pool {
@@ -129,15 +133,14 @@ server {
 }
 ```
 
-Session affinity (sticky) using `ip_hash`:
+Session affinity (sticky sessions) via `ip_hash` — same client IP always lands on the same backend:
 ```nginx
 upstream app_pool { ip_hash; server 10.0.0.11:3000; server 10.0.0.12:3000; }
 ```
 
----
+### WebSocket and gRPC proxying
 
-### WebSocket and gRPC Proxying
-- WebSocket requires `Upgrade` and `Connection` headers.
+WebSocket requires forwarding the `Upgrade`/`Connection` handshake headers explicitly — nginx doesn't do this automatically:
 ```nginx
 location /ws/ {
     proxy_set_header Upgrade $http_upgrade;
@@ -147,7 +150,7 @@ location /ws/ {
 }
 ```
 
-- gRPC (HTTP/2) proxy:
+gRPC rides on HTTP/2, so the listener needs `http2` and the `grpc_pass` directive instead of `proxy_pass`:
 ```nginx
 upstream grpc_backend { server 127.0.0.1:50051; }
 
@@ -163,10 +166,9 @@ server {
 }
 ```
 
----
+### TLS/SSL
 
-### TLS/SSL Configuration
-Basic TLS server with HSTS and modern ciphers:
+Basic TLS server with HSTS, modern ciphers, and HTTP→HTTPS redirect:
 ```nginx
 server {
     listen 443 ssl http2;
@@ -197,14 +199,13 @@ server {
 }
 ```
 
-Let's Encrypt (Certbot):
+Let's Encrypt via Certbot:
 ```bash
 sudo apt install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d example.com -d www.example.com --redirect --hsts --agree-tos -m admin@example.com --non-interactive
 ```
 
-HTTP/3 (QUIC) notes:
-- Requires Nginx built with QUIC (nginx 1.25+ with `--with-http_v3_module` and a QUIC-capable TLS library such as BoringSSL or OpenSSL 3 with QUIC).
+HTTP/3 (QUIC) requires nginx built with QUIC support (1.25+, `--with-http_v3_module`, plus a QUIC-capable TLS library like BoringSSL or OpenSSL 3 with QUIC):
 ```nginx
 server {
     listen 443 http3 reuseport;
@@ -214,11 +215,9 @@ server {
 }
 ```
 
----
-
 ### Caching
-- Static caching via `Cache-Control` headers (from app or Nginx add_header).
-- Proxy cache:
+
+Proxy cache for API responses:
 ```nginx
 proxy_cache_path /var/cache/nginx keys_zone=api_cache:100m max_size=10g inactive=60m use_temp_path=off;
 
@@ -233,7 +232,7 @@ server {
 }
 ```
 
-FastCGI cache (PHP‑FPM):
+FastCGI cache for PHP-FPM:
 ```nginx
 fastcgi_cache_path /var/cache/nginx/fastcgi levels=1:2 keys_zone=fcgicache:100m inactive=60m;
 location ~ \.php$ {
@@ -245,10 +244,13 @@ location ~ \.php$ {
 }
 ```
 
----
+`$upstream_cache_status` (HIT/MISS/BYPASS/EXPIRED) exposed as a response header is the fastest way to debug whether caching is actually working.
 
-### Performance Tuning
-In `/etc/nginx/nginx.conf`:
+## 🔴 Advanced: performance tuning, security, observability
+
+### Performance tuning
+
+`/etc/nginx/nginx.conf`:
 ```nginx
 user www-data;
 worker_processes auto;
@@ -284,39 +286,38 @@ http {
 }
 ```
 
-Kernel/OS considerations:
-- Increase `fs.file-max`, `net.core.somaxconn`, and relevant `ulimit -n` for high connections.
-- Use `reuseport` for multi-queue NICs; ensure IRQ affinity and RPS/RFS are tuned.
+Kernel/OS tuning for high connection counts: raise `fs.file-max`, `net.core.somaxconn`, and the relevant `ulimit -n`. Use `reuseport` on multi-queue NICs and check IRQ affinity / RPS / RFS tuning for very high throughput.
 
----
+### Security hardening
 
-### Security Hardening
-- Run as non-root worker (`user www-data;`).
-- Limit methods:
 ```nginx
+# Run as non-root worker (set in main context)
+# user www-data;
+
+# Limit HTTP methods
 if ($request_method !~ ^(GET|HEAD|POST)$) { return 405; }
-```
-- Disable server tokens:
-```nginx
+
+# Hide version info
 server_tokens off;
 ```
-- Rate limiting:
+
+Rate and connection limiting:
 ```nginx
 limit_req_zone $binary_remote_addr zone=api_burst:10m rate=10r/s;
 server { location /api/ { limit_req zone=api_burst burst=20 nodelay; } }
-```
-- Connection limiting:
-```nginx
+
 limit_conn_zone $binary_remote_addr zone=addr:10m;
 server { location / { limit_conn addr 20; } }
 ```
-- Size limits and timeouts:
+
+Size limits and timeouts (protects against slow-loris style attacks and oversized uploads):
 ```nginx
 client_max_body_size 10m;
 client_body_timeout 15s;
 send_timeout 30s;
 ```
-- Security headers:
+
+Security headers:
 ```nginx
 add_header X-Frame-Options DENY;
 add_header X-Content-Type-Options nosniff;
@@ -324,61 +325,56 @@ add_header Referrer-Policy strict-origin-when-cross-origin;
 add_header Content-Security-Policy "default-src 'self'";
 ```
 
----
+### Logging and observability
 
-### Logging and Observability
-- Access/error logs per server or globally.
-- Custom `log_format`, including JSON for ingestion into ELK/Datadog:
+Structured JSON logging for ingestion into ELK/Datadog:
 ```nginx
 log_format json_combined '{"time":"$time_iso8601","remote_addr":"$remote_addr","request":"$request","status":$status,"bytes_sent":$bytes_sent,"referer":"$http_referer","user_agent":"$http_user_agent","request_time":$request_time,"upstream":"$upstream_addr","upstream_time":"$upstream_response_time"}';
 
 access_log /var/log/nginx/access.json json_combined;
 error_log /var/log/nginx/error.log warn;
 ```
-- Metrics:
-  - `stub_status`:
+
+Built-in metrics via `stub_status` (pair with `nginx-prometheus-exporter` for real monitoring):
 ```nginx
 server {
     listen 127.0.0.1:8080;
     location /nginx_status { stub_status; allow 127.0.0.1; deny all; }
 }
 ```
-  - Use an external exporter (e.g., `nginx-prometheus-exporter`).
-- Log rotation via `logrotate`.
 
----
+Rotate logs with `logrotate`.
 
-### Zero‑Downtime Reloads and Deployments
-- Validate config: `nginx -t`
-- Reload without dropping connections: `systemctl reload nginx` or `nginx -s reload`
-- Use `proxy_next_upstream`, `health checks`, and `fail_timeout` to survive backend restarts.
+### Zero-downtime reloads
 
----
+```bash
+nginx -t                          # validate first, always
+sudo systemctl reload nginx       # or: nginx -s reload — reloads without dropping connections
+```
+Combine with `proxy_next_upstream`, health checks (`max_fails`/`fail_timeout`), to survive backend restarts gracefully.
 
-### Common Troubleshooting
-- Port already in use → check `sudo ss -ltnp | grep :80`
-- Permission denied on `listen 80` (non-Linux) → need privileges or `authbind`
-- 502/504 from upstream → check upstream health/connectivity and `proxy_read_timeout`
-- Large file uploads → raise `client_max_body_size`
-- WebSocket disconnects → set `proxy_read_timeout` higher and include upgrade headers
-- Use logs: `tail -f /var/log/nginx/error.log /var/log/nginx/access.log`
+## Common troubleshooting
 
----
+| Symptom | Cause / fix |
+|---|---|
+| Port already in use | Check `sudo ss -ltnp \| grep :80` for a conflicting process |
+| Permission denied on `listen 80` | Need root/CAP_NET_BIND_SERVICE, or use `authbind` |
+| 502/504 from upstream | Check upstream health/connectivity and `proxy_read_timeout` |
+| Large file uploads fail | Raise `client_max_body_size` |
+| WebSocket disconnects | Raise `proxy_read_timeout`; confirm `Upgrade`/`Connection` headers are forwarded |
+| Nothing helps | `tail -f /var/log/nginx/error.log /var/log/nginx/access.log` |
 
-### Best Practices Checklist
-- Use `worker_processes auto;` and right `worker_connections`
-- Keep TLS configs up to date; enable HTTP/2, consider HTTP/3 when stable
-- Terminate TLS at Nginx; pass upstream via loopback or private network
-- Implement rate limiting and sensible timeouts
-- Keep logs structured; ship to central store
-- Template configs and validate in CI (`nginx -t`)
-- Separate concerns: static vs API, cache where safe
+## Best practices checklist
 
----
+- Set `worker_processes auto;` and size `worker_connections` to your `ulimit -n`.
+- Keep TLS config current; enable HTTP/2, consider HTTP/3 once stable for your stack.
+- Terminate TLS at nginx; talk to upstreams over loopback or a private network.
+- Implement rate limiting and sane timeouts on every public-facing `location`.
+- Ship structured logs to a central store.
+- Template configs and validate them in CI (`nginx -t`).
+- Separate static and API concerns; cache aggressively where it's safe to.
 
-### References
+## Further reading
 - Nginx official docs: `https://nginx.org/en/docs/`
-- Hardening guides: `https://mozilla.github.io/server-side-tls/`
+- Mozilla server-side TLS guide: `https://mozilla.github.io/server-side-tls/`
 - Certbot: `https://certbot.eff.org/`
-
-

@@ -24,74 +24,15 @@ gRPC addresses limitations of traditional REST APIs and older RPC frameworks:
   - Language-agnostic: Protobuf vs. language-specific stubs.
   - Scalability: Designed for distributed systems vs. tightly coupled client-server models.
  
-### 📦 REST vs GraphQL
+### When NOT to Use gRPC
+gRPC isn't a universal replacement for REST — it has real gaps:
+- **Browsers can't speak native gRPC.** Browsers don't expose the low-level HTTP/2 framing control gRPC needs (trailers, specific frame types), so a browser JS client cannot call a gRPC service directly. The workaround is **grpc-web**, a JS client library plus a proxy (Envoy, or gRPC's own grpc-web proxy) that translates between a restricted gRPC-over-HTTP/1.1-or-2 subset and true gRPC on the backend. This adds an extra moving part to your infra that plain REST/JSON never needs.
+- **Poor human readability/debuggability.** Binary protobuf payloads can't be eyeballed in browser dev tools or casually inspected with `curl` the way JSON can — you need `grpcurl` or protobuf-aware tooling.
+- **Third-party/public API consumption.** External developers integrating with your API generally expect REST/JSON — it's the lower-friction, more universally tooled choice for a public-facing API with unknown clients.
+- **Simple CRUD services with no performance pressure.** If you're not latency- or bandwidth-constrained, REST's simplicity and ubiquity often outweighs gRPC's performance edge.
+- **Caching**: HTTP/1.1 REST responses cache trivially at CDNs/proxies via standard `Cache-Control` semantics; gRPC's binary POST-based calls don't fit that caching model naturally.
 
-| Feature                        | REST                                    | GraphQL                               |
-| ------------------------------ | --------------------------------------- | ------------------------------------- |
-| Endpoint structure             | Multiple endpoints (`/users`, `/posts`) | Single endpoint (`/graphql`)          |
-| Data fetching                  | Fixed response structure                | Client defines what data to fetch     |
-| Over-fetching / Under-fetching | Common problem                          | Avoided (fetch exactly what you want) |
-| Versioning                     | Needs versioning (v1, v2, etc.)         | Often no versioning needed            |
-| Response size                  | May be large or incomplete              | Tailored to client's request          |
-
----
-
-### 🛠 GraphQL Operations
-
-1. **Query** – to **read** data
-
-   ```graphql
-   query {
-     user(id: "1") {
-       name
-       email
-     }
-   }
-   ```
-
-2. **Mutation** – to **create/update/delete** data
-
-   ```graphql
-   mutation {
-     addPost(title: "Hello", content: "World") {
-       id
-       title
-     }
-   }
-   ```
-
-3. **Subscription** – to get **real-time updates**
-
-   ```graphql
-   subscription {
-     messageAdded {
-       content
-       sender
-     }
-   }
-   ```
-
----
-
-### 🧩 Example Use Case
-
-You can request nested and related data in one query:
-
-```graphql
-query {
-  user(id: "1") {
-    name
-    posts {
-      title
-      comments {
-        content
-      }
-    }
-  }
-}
-```
-
-This replaces what would be **multiple REST requests**.
+Use gRPC where you control both ends (internal microservice-to-microservice calls), need streaming, or need the performance — not for public browser-facing APIs without a grpc-web proxy layer.
 
 ## Protocol Buffers: The Heart of gRPC
 **Protocol Buffers (protobuf)** is Google’s language-agnostic, extensible mechanism for serializing structured data. It serves as the IDL for gRPC, defining services, methods, and message types.

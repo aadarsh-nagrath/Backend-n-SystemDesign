@@ -150,6 +150,84 @@ HTTP status codes indicate the outcome of a client’s request. They are grouped
      - **500 Internal Server Error**: Generic server error.
      - **503 Service Unavailable**: Server is temporarily unavailable (e.g., maintenance).
 
+## The Richardson Maturity Model
+A framework by Leonard Richardson for grading how "RESTful" an API actually is, on a 0-3 scale. Most APIs called "REST" in the wild are actually Level 2 — true Level 3 (HATEOAS) is rare.
+
+- **Level 0 — The Swamp of POX**:
+  - A single URI endpoint, one HTTP method (usually POST), and the "API" is really just RPC-over-HTTP.
+  - Example: `POST /api` with a body like `{ "action": "getUser", "id": 123 }`. All requests hit the same endpoint; the body decides what happens.
+  - This is what SOAP and most XML-RPC services look like — HTTP is just a transport, not part of the design.
+
+- **Level 1 — Resources**:
+  - Introduces multiple URIs, one per resource, but still typically uses a single HTTP method (often POST) for everything.
+  - Example: `POST /users/123` and `POST /orders/456` instead of one shared endpoint — but every request might still be a POST regardless of intent.
+
+- **Level 2 — HTTP Verbs**:
+  - Uses HTTP methods (GET, POST, PUT, DELETE, PATCH) as they're meant to be used, plus proper status codes.
+  - Example: `GET /users/123` to fetch, `PUT /users/123` to replace, `DELETE /users/123` to remove — each verb carries real semantic meaning, and responses use codes like 200, 201, 404 correctly.
+  - **This is where the vast majority of "REST APIs" in production actually sit.** Stripe, GitHub's REST API, Twitter's API — all Level 2. It's a pragmatic, well-understood sweet spot.
+
+- **Level 3 — Hypermedia Controls (HATEOAS)**:
+  - Responses include links describing available next actions, so clients discover the API dynamically instead of hardcoding URI structures.
+  - Example: `GET /orders/456` returns not just order data but `{ "links": { "cancel": "/orders/456/cancel", "pay": "/orders/456/pay" } }` — and if the order is already paid, the `pay` link simply isn't present.
+  - Rarely implemented fully in practice — it adds real complexity (clients must be written to follow links rather than assume URIs) for benefits (loose coupling, discoverability, self-documenting state transitions) that most teams don't end up needing. Roy Fielding himself has argued that without HATEOAS, an API isn't "true REST" — but the industry mostly stopped at Level 2 anyway.
+
+| Level | Adds | Example |
+|-------|------|---------|
+| 0 | Single endpoint, HTTP as tunnel | `POST /api` with action in body |
+| 1 | Multiple resource URIs | `POST /users/123` |
+| 2 | Proper HTTP verbs + status codes | `GET/PUT/DELETE /users/123` |
+| 3 | Hypermedia links (HATEOAS) | Response includes `links.cancel`, `links.pay` |
+
+## Idempotency Keys: Safe Retries for Non-Idempotent Operations
+GET, PUT, and DELETE are naturally idempotent — retrying them is safe by design. **POST is not** — retrying a `POST /payments` because a client timed out waiting for a response can create a duplicate charge, even though the first request may have actually succeeded server-side. Network failures don't tell you whether the original request failed before or after the server processed it, so a naive "just retry" strategy is dangerous for anything with side effects (payments, order creation, sending an email).
+
+**The pattern**: the client generates a unique key (typically a UUIDv4) and sends it with the request. The server uses that key to deduplicate — if it sees the same key again, it returns the *original* result instead of re-executing the operation.
+
+```http
+POST /payments HTTP/1.1
+Content-Type: application/json
+Idempotency-Key: 7c3e1a2b-9f4d-4e2a-8b1c-6d5f3a9e0c11
+
+{ "amount": 5000, "currency": "usd", "customer": "cus_123" }
+```
+
+Server-side implementation sketch:
+1. On receiving a request with an `Idempotency-Key` header, check a store (Redis, a DB table) for that key.
+2. **Key not seen before**: process the request normally, then store `{ key -> (status_code, response_body) }`, typically with a TTL (e.g., 24 hours).
+3. **Key seen, operation completed**: skip reprocessing, return the stored response immediately with the same status code.
+4. **Key seen, operation still in-flight** (a concurrent retry raced the original): return `409 Conflict` or block briefly, to avoid double-processing a request that's still executing.
+5. **Key seen, but request payload differs from the original**: return `422 Unprocessable Entity` — reusing a key with a different body is a client bug, not a legitimate retry.
+
+```python
+def handle_payment(request):
+    key = request.headers.get('Idempotency-Key')
+    if not key:
+        return error_response(400, 'Idempotency-Key header is required')
+
+    cached = idempotency_store.get(key)
+    if cached:
+        if cached['status'] == 'in_progress':
+            return error_response(409, 'Request with this key is still processing')
+        return make_response(cached['body'], cached['status_code'])
+
+    idempotency_store.set(key, {'status': 'in_progress'}, ttl=86400)
+    result = process_payment(request.json)
+    idempotency_store.set(key, {
+        'status': 'completed',
+        'status_code': 201,
+        'body': result
+    }, ttl=86400)
+    return make_response(result, 201)
+```
+
+**Real-world usage**: Stripe, PayPal, and most payment APIs require or strongly recommend an `Idempotency-Key` on any mutating request. It's also common for other "create" operations where duplicates are costly — order placement, sending notifications, provisioning infrastructure.
+
+⚠️ **Gotchas**:
+- The key must be unique **per logical operation attempt**, not reused across genuinely different requests — generate a new key for each new business operation, but reuse the *same* key when retrying that same operation after a timeout.
+- Store idempotency records with a TTL — keeping them forever wastes storage; too short a TTL and a very delayed retry slips through as a duplicate.
+- This only protects the endpoint that implements it — it's not automatic just because you're using PUT/DELETE elsewhere in the API.
+
 ## Designing RESTful APIs
 Designing a RESTful API involves adhering to best practices to ensure usability, scalability, and maintainability:
 

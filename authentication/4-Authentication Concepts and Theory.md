@@ -1,759 +1,157 @@
-# Authentication Concepts and Theory
-
-## Introduction
+# Authentication concepts and theory
 
-This document provides comprehensive theoretical understanding of authentication concepts, principles, and methodologies. It serves as the foundational knowledge base that supports the practical implementation guides in the other documents.
+The theoretical foundation underneath the practical guides: what authentication factors actually are, how threat models and compliance regimes shape design decisions, and how authentication systems get architected at scale. Where a topic has a dedicated practical guide (JWT structure, OAuth flows, WebAuthn mechanics), this file gives the conceptual framing and links out rather than re-deriving the mechanics — see [1-authentication.md](<1-authentication.md>), [2-Comprehensive Guide to JSON Web Tokens (JWT).md](<2-Comprehensive Guide to JSON Web Tokens (JWT).md>), [3-Oauth Guide.md](<3-Oauth Guide.md>), and [Advanced Authentication Concepts.md](<Advanced Authentication Concepts.md>).
 
-## 1. Authentication Fundamentals
+## TL;DR
+- **Authentication** = "who are you?" (identity verification). **Authorization** = "what can you do?" (permission management). Authentication is always the prerequisite.
+- Three classic factors: **knowledge** (something you know), **possession** (something you have), **inherence** (something you are). MFA combines factors from different categories — two passwords isn't MFA.
+- Modern authentication design is driven as much by **threat modeling and compliance** (GDPR, HIPAA, PCI-DSS) as by the mechanism itself.
+- Architecture shape matters: **centralized** (single IdP, SSO) vs. **distributed** (per-service auth, API gateways) vs. **hybrid** (multi-cloud) each trade off consistency, blast radius, and operational complexity differently.
+- Emerging directions: passwordless/passkeys (see [Advanced Authentication Concepts.md](<Advanced Authentication Concepts.md>) for the full WebAuthn treatment), risk-based/continuous authentication, and — much further out — quantum-resistant cryptography.
 
-### What is Authentication?
-
-Authentication is the process of verifying the identity of a user, device, or system attempting to access a resource. It answers the fundamental question: **"Who are you?"**
+## 1. Authentication fundamentals
 
-#### Key Principles
-- **Identity Verification**: Confirming that an entity is who it claims to be
-- **Trust Establishment**: Building confidence in the claimed identity
-- **Access Control Foundation**: Authentication is the prerequisite for authorization
-- **Security Boundary**: Creates a security perimeter around protected resources
-
-#### Authentication vs. Authorization
-- **Authentication (AuthN)**: "Who are you?" - Identity verification
-- **Authorization (AuthZ)**: "What are you allowed to do?" - Permission management
-
-### Authentication Factors
-
-Authentication relies on three fundamental factors, often combined for enhanced security:
-
-#### 1. Knowledge Factors (Something You Know)
-- **Passwords**: Traditional text-based secrets
-- **PINs**: Numeric personal identification numbers
-- **Security Questions**: Personal information for account recovery
-- **Passphrases**: Longer, more complex text strings
-
-**Characteristics:**
-- Easy to implement and use
-- Vulnerable to guessing, phishing, and social engineering
-- Can be forgotten or shared
-- Cost-effective for basic security needs
-
-#### 2. Possession Factors (Something You Have)
-- **Hardware Tokens**: Physical devices like YubiKey, RSA SecurID
-- **Smart Cards**: Chip-based authentication cards
-- **Mobile Devices**: Smartphones with authenticator apps
-- **Email/SMS**: Secondary communication channels
-
-**Characteristics:**
-- More secure than knowledge factors alone
-- Can be lost, stolen, or damaged
-- Requires physical possession
-- Higher implementation and maintenance costs
-
-#### 3. Inherence Factors (Something You Are)
-- **Biometrics**: Fingerprint, facial recognition, iris scanning
-- **Voice Recognition**: Speech pattern analysis
-- **Behavioral Biometrics**: Typing patterns, mouse movements
-- **Gait Analysis**: Walking pattern recognition
-
-**Characteristics:**
-- Highly unique and difficult to replicate
-- Cannot be forgotten or lost
-- Privacy concerns and legal considerations
-- Requires specialized hardware and software
-
-### Multi-Factor Authentication (MFA)
-
-MFA combines multiple authentication factors to create stronger security:
-
-#### MFA Types
-1. **Two-Factor Authentication (2FA)**: Combines two different factors
-2. **Three-Factor Authentication (3FA)**: Uses all three factor types
-3. **Adaptive MFA**: Dynamically adjusts factors based on risk assessment
-
-#### MFA Benefits
-- **Enhanced Security**: Significantly reduces attack success rates
-- **Compliance**: Meets regulatory requirements (GDPR, HIPAA, PCI-DSS)
-- **Risk Mitigation**: Protects against credential theft
-- **User Confidence**: Builds trust in the security system
-
-#### MFA Challenges
-- **User Experience**: Additional friction in authentication process
-- **Implementation Complexity**: Requires careful design and testing
-- **Cost**: Hardware tokens and biometric systems can be expensive
-- **Recovery**: Account recovery becomes more complex
-
-## 2. Authentication Protocols and Standards
-
-### OAuth 2.0 Deep Dive
-
-#### Core Concepts
-OAuth 2.0 is an authorization framework that enables third-party applications to access user resources without sharing credentials.
-
-**Key Principles:**
-- **Delegated Authorization**: Apps act on behalf of users with explicit consent
-- **Token-Based**: Uses access tokens instead of credentials
-- **Scope-Based**: Granular permission control
-- **Stateless**: No server-side session storage required
-
-#### OAuth 2.0 Roles
-1. **Resource Owner**: The user who owns the data
-2. **Client**: The application requesting access
-3. **Authorization Server**: Issues tokens after user consent
-4. **Resource Server**: Hosts protected resources
-
-#### OAuth 2.0 Flows Explained
-
-**Authorization Code Flow:**
-- Most secure flow for server-side applications
-- Uses authorization codes to exchange for tokens
-- Prevents token exposure in browser
-- Supports refresh tokens for long-term access
-
-**Implicit Flow:**
-- Designed for browser-based applications
-- Tokens returned directly via redirect
-- No refresh token support
-- **Deprecated** due to security concerns
-
-**Client Credentials Flow:**
-- For server-to-server communication
-- No user involvement required
-- Uses client ID and secret for authentication
-- Suitable for API access
-
-**Device Authorization Flow:**
-- For devices with limited input capabilities
-- Uses device codes and user codes
-- Polling mechanism for token retrieval
-- Ideal for IoT devices and smart TVs
-
-#### OAuth 2.0 Security Considerations
-- **Token Security**: Access tokens must be protected from theft
-- **Scope Validation**: Verify requested permissions are appropriate
-- **Redirect URI Validation**: Prevent authorization code interception
-- **State Parameter**: Protect against CSRF attacks
-- **PKCE**: Essential for public clients
-
-### OpenID Connect (OIDC)
-
-#### What is OIDC?
-OpenID Connect is an authentication layer built on top of OAuth 2.0 that adds identity verification capabilities.
-
-#### OIDC Components
-1. **ID Token**: JWT containing user identity information
-2. **UserInfo Endpoint**: REST API for additional user attributes
-3. **Discovery**: Dynamic discovery of provider capabilities
-4. **Scopes**: Standard scopes for identity information
-
-#### OIDC Flows
-- **Authorization Code Flow**: Most secure, includes ID token
-- **Implicit Flow**: Direct ID token return (deprecated)
-- **Hybrid Flow**: Combines authorization code and implicit flows
-
-#### OIDC Claims
-- **Standard Claims**: Defined by OIDC specification
-- **Custom Claims**: Application-specific user information
-- **Essential Claims**: Required for authentication (sub, iss, aud, exp, iat)
-
-### SAML (Security Assertion Markup Language)
-
-#### SAML Overview
-SAML is an XML-based standard for exchanging authentication and authorization data between parties.
-
-#### SAML Components
-1. **Assertions**: Contain user information and authentication details
-2. **Protocols**: Define message exchange patterns
-3. **Bindings**: Specify transport mechanisms (HTTP POST, Redirect, etc.)
-4. **Profiles**: Define specific use cases (Web Browser SSO, Single Logout)
-
-#### SAML Flow
-1. **User Access**: User attempts to access protected resource
-2. **SP Redirect**: Service Provider redirects to Identity Provider
-3. **Authentication**: User authenticates with IdP
-4. **SAML Response**: IdP sends signed assertion to SP
-5. **Access Granted**: SP validates assertion and grants access
-
-#### SAML vs. OAuth 2.0
-- **SAML**: XML-based, enterprise-focused, strong for SSO
-- **OAuth 2.0**: JSON-based, API-focused, flexible for modern applications
-- **SAML**: More complex but comprehensive
-- **OAuth 2.0**: Simpler but requires OIDC for authentication
-
-### WebAuthn (Web Authentication API)
-
-#### WebAuthn Fundamentals
-WebAuthn is a web standard for passwordless authentication using public-key cryptography.
-
-#### How WebAuthn Works
-1. **Registration**: Browser generates key pair, public key sent to server
-2. **Authentication**: Server sends challenge, device signs with private key
-3. **Verification**: Server verifies signature using stored public key
-
-#### WebAuthn Benefits
-- **Passwordless**: Eliminates password-related vulnerabilities
-- **Phishing-Resistant**: Domain-specific keys prevent cross-site attacks
-- **Multi-Factor**: Combines possession (device) with inherence (biometrics)
-- **Standardized**: Works across browsers and platforms
-
-#### WebAuthn Components
-- **Authenticator**: Hardware or software that generates credentials
-- **Relying Party**: The website or application using WebAuthn
-- **User Agent**: Browser that implements the WebAuthn API
-- **Attestation**: Process of verifying authenticator authenticity
-
-## 3. Token-Based Authentication
-
-### JWT (JSON Web Tokens) Theory
-
-#### JWT Structure
-JWTs consist of three parts separated by dots:
-1. **Header**: Algorithm and token type information
-2. **Payload**: Claims (user data and metadata)
-3. **Signature**: Cryptographic signature for integrity
-
-#### JWT Claims
-**Registered Claims:**
-- `iss` (Issuer): Token issuer
-- `sub` (Subject): Token subject (user ID)
-- `aud` (Audience): Intended recipient
-- `exp` (Expiration): Token expiration time
-- `iat` (Issued At): Token issuance time
-- `nbf` (Not Before): Token validity start time
-- `jti` (JWT ID): Unique token identifier
-
-**Public Claims:**
-- Defined in public registries
-- Can be used across applications
-- Examples: `name`, `email`, `picture`
-
-**Private Claims:**
-- Application-specific claims
-- Custom user data
-- Examples: `roles`, `permissions`, `preferences`
-
-#### JWT Signing Algorithms
-- **HS256**: HMAC with SHA-256 (symmetric)
-- **RS256**: RSA with SHA-256 (asymmetric)
-- **ES256**: ECDSA with SHA-256 (elliptic curve)
-- **PS256**: RSA-PSS with SHA-256 (probabilistic)
-
-#### JWT Security Considerations
-- **Algorithm Validation**: Always verify the signing algorithm
-- **Token Expiration**: Use short-lived tokens
-- **Signature Verification**: Validate signatures on every request
-- **Claim Validation**: Check all relevant claims
-- **Token Storage**: Secure storage on client side
-
-### Session vs. Token-Based Authentication
-
-#### Session-Based Authentication
-**How it Works:**
-1. User authenticates with credentials
-2. Server creates session and stores session data
-3. Server sends session ID to client (usually in cookie)
-4. Client includes session ID in subsequent requests
-5. Server looks up session data to authenticate user
-
-**Characteristics:**
-- **Stateful**: Requires server-side session storage
-- **Easy Revocation**: Sessions can be invalidated immediately
-- **Scalability Challenges**: Requires shared session store
-- **CSRF Vulnerable**: Susceptible to cross-site request forgery
-
-#### Token-Based Authentication
-**How it Works:**
-1. User authenticates with credentials
-2. Server issues signed token containing user data
-3. Client stores token and includes it in requests
-4. Server verifies token signature and extracts user data
-5. No server-side storage required
-
-**Characteristics:**
-- **Stateless**: No server-side storage required
-- **Scalable**: Works across multiple servers
-- **Revocation Challenges**: Difficult to revoke before expiration
-- **Token Theft**: Stolen tokens can be used until expiration
-
-#### Comparison
-| Aspect | Session-Based | Token-Based |
-|--------|---------------|-------------|
-| **State** | Stateful | Stateless |
-| **Storage** | Server-side | Client-side |
-| **Scalability** | Limited | High |
-| **Revocation** | Easy | Difficult |
-| **Security Risks** | CSRF, session hijacking | Token theft, replay attacks |
-
-## 4. Advanced Authentication Concepts
-
-### Zero-Knowledge Proofs
-
-#### What are Zero-Knowledge Proofs?
-Zero-knowledge proofs allow one party to prove they know a secret without revealing the secret itself.
-
-#### Properties of Zero-Knowledge Proofs
-1. **Completeness**: If the statement is true, honest verifier will accept honest prover
-2. **Soundness**: If the statement is false, no cheating prover can convince honest verifier
-3. **Zero-Knowledge**: Verifier learns nothing other than the fact that the statement is true
-
-#### Types of Zero-Knowledge Proofs
-- **zk-SNARKs**: Succinct Non-interactive Arguments of Knowledge
-- **zk-STARKs**: Scalable Transparent Arguments of Knowledge
-- **Bulletproofs**: Efficient range proofs
-- **Sigma Protocols**: Interactive zero-knowledge proofs
-
-#### Applications in Authentication
-- **Privacy-Preserving Authentication**: Prove identity without revealing personal data
-- **Blockchain Authentication**: Verify transactions without exposing details
-- **Voting Systems**: Prove eligibility without revealing identity
-- **Credential Verification**: Prove possession of credentials without sharing them
-
-### Risk-Based Authentication (RBA)
-
-#### RBA Principles
-Risk-based authentication dynamically adjusts authentication requirements based on risk assessment.
-
-#### Risk Factors
-1. **Location-Based**: Geographic location, IP address, VPN usage
-2. **Device-Based**: Device fingerprint, browser type, operating system
-3. **Time-Based**: Time of day, day of week, unusual access patterns
-4. **Behavior-Based**: Typing patterns, mouse movements, application usage
-5. **Network-Based**: Network type, connection security, known malicious IPs
-
-#### Risk Assessment Models
-- **Rule-Based**: Simple if-then rules for risk factors
-- **Machine Learning**: AI-powered risk scoring
-- **Hybrid Approaches**: Combination of rules and ML
-- **Adaptive Models**: Continuously learning from user behavior
-
-#### RBA Benefits
-- **Enhanced Security**: Stronger authentication for high-risk scenarios
-- **User Experience**: Reduced friction for low-risk situations
-- **Cost Efficiency**: Optimize security resources
-- **Compliance**: Meet regulatory requirements for risk assessment
-
-### Continuous Authentication
-
-#### What is Continuous Authentication?
-Continuous authentication monitors user behavior throughout a session to ensure the same user remains active.
-
-#### Monitoring Methods
-1. **Keystroke Dynamics**: Typing patterns, timing, and rhythm
-2. **Mouse Movements**: Cursor behavior, click patterns, scrolling
-3. **Device Usage**: How the user interacts with the device
-4. **Application Usage**: Which applications are being used and how
-5. **Network Patterns**: Network usage behavior and patterns
-
-#### Continuous Authentication Models
-- **Behavioral Profiling**: Build user behavior profiles
-- **Anomaly Detection**: Identify deviations from normal behavior
-- **Risk Scoring**: Calculate continuous risk scores
-- **Adaptive Thresholds**: Adjust sensitivity based on context
-
-#### Implementation Challenges
-- **Privacy Concerns**: Continuous monitoring raises privacy issues
-- **False Positives**: Legitimate behavior changes may trigger alerts
-- **Performance Impact**: Monitoring can affect system performance
-- **User Acceptance**: Users may find continuous monitoring intrusive
-
-### Passwordless Authentication
-
-#### Passwordless Methods
-1. **Magic Links**: Email or SMS links that authenticate users
-2. **Biometrics**: Fingerprint, facial recognition, voice recognition
-3. **Hardware Tokens**: YubiKey, smart cards, security keys
-4. **Push Notifications**: Mobile app notifications for approval
-5. **QR Codes**: Scan codes to authenticate
-
-#### Passwordless Benefits
-- **Enhanced Security**: Eliminates password-related vulnerabilities
-- **User Experience**: Simplified authentication process
-- **Reduced Support**: Fewer password reset requests
-- **Compliance**: Meets modern security standards
-
-#### Passwordless Challenges
-- **Device Dependency**: Requires specific devices or apps
-- **Recovery Complexity**: Account recovery becomes more complex
-- **Implementation Cost**: Hardware tokens and biometric systems
-- **User Adoption**: Users may be resistant to change
-
-## 5. Authentication Security Concepts
-
-### Threat Models
-
-#### Common Authentication Threats
-1. **Credential Theft**: Passwords stolen through various means
-2. **Session Hijacking**: Unauthorized access to active sessions
-3. **Man-in-the-Middle**: Interception of authentication traffic
-4. **Brute Force**: Systematic guessing of credentials
-5. **Social Engineering**: Manipulation of users to reveal credentials
-6. **Phishing**: Fake websites designed to steal credentials
-
-#### Attack Vectors
-- **Network Attacks**: Packet sniffing, DNS spoofing
-- **Application Attacks**: SQL injection, XSS, CSRF
-- **Physical Attacks**: Shoulder surfing, device theft
-- **Social Attacks**: Phishing, pretexting, baiting
-
-### Security Principles
-
-#### Defense in Depth
-Implement multiple layers of security controls:
-1. **Network Security**: Firewalls, VPNs, encryption
-2. **Application Security**: Input validation, secure coding
-3. **Authentication Security**: Strong passwords, MFA
-4. **Session Security**: Secure session management
-5. **Monitoring**: Logging, alerting, incident response
-
-#### Principle of Least Privilege
-Users should have only the minimum permissions necessary to perform their tasks.
-
-#### Fail-Safe Defaults
-Systems should default to a secure state, requiring explicit action to reduce security.
-
-#### Security by Design
-Security should be integrated into the design process from the beginning.
-
-### Authentication Vulnerabilities
-
-#### Common Vulnerabilities
-1. **Weak Passwords**: Easily guessable or common passwords
-2. **Password Reuse**: Same password across multiple accounts
-3. **Insecure Storage**: Passwords stored in plain text or weak hashing
-4. **Insufficient Rate Limiting**: Allows brute force attacks
-5. **Session Management Issues**: Predictable session IDs, no expiration
-6. **Token Security**: Insecure token storage, no expiration
-
-#### Vulnerability Mitigation
-- **Strong Password Policies**: Enforce complex password requirements
-- **Password Managers**: Encourage use of password managers
-- **Secure Hashing**: Use strong hashing algorithms (bcrypt, Argon2)
-- **Rate Limiting**: Implement progressive delays and account lockouts
-- **Secure Sessions**: Use secure session management practices
-- **Token Security**: Implement proper token lifecycle management
-
-## 6. Authentication Architecture Patterns
-
-### Centralized Authentication
-
-#### Identity Provider (IdP) Pattern
-- **Single Source of Truth**: One system manages all identities
-- **Federation**: Multiple applications trust the IdP
-- **Single Sign-On**: Users authenticate once for multiple applications
-- **Centralized Management**: User lifecycle managed in one place
-
-#### Benefits
-- **Consistency**: Uniform authentication across applications
-- **Efficiency**: Reduced administrative overhead
-- **Security**: Centralized security controls
-- **User Experience**: Single login for multiple applications
-
-#### Challenges
-- **Single Point of Failure**: IdP failure affects all applications
-- **Scalability**: IdP must handle all authentication requests
-- **Complexity**: Requires careful design and implementation
-- **Vendor Lock-in**: Dependency on specific IdP solutions
-
-### Distributed Authentication
-
-#### Microservices Authentication
-- **Service-to-Service**: Authentication between microservices
-- **API Gateway**: Centralized authentication at the gateway
-- **Token Propagation**: Tokens passed between services
-- **Service Mesh**: Authentication handled by service mesh
-
-#### Benefits
-- **Scalability**: Each service can scale independently
-- **Resilience**: Failure isolation between services
-- **Flexibility**: Different authentication methods per service
-- **Performance**: Reduced latency through distributed processing
-
-#### Challenges
-- **Complexity**: More complex to implement and manage
-- **Security**: More attack surface and potential vulnerabilities
-- **Consistency**: Ensuring consistent authentication across services
-- **Monitoring**: Distributed monitoring and logging
-
-### Hybrid Authentication
-
-#### Multi-Cloud Authentication
-- **Cloud Identity Providers**: AWS Cognito, Azure AD, Google Identity
-- **On-Premises Integration**: Hybrid cloud and on-premises authentication
-- **Federation**: Trust relationships between different identity providers
-- **Synchronization**: User data synchronization between systems
-
-#### Benefits
-- **Flexibility**: Choose best authentication method for each use case
-- **Migration Path**: Gradual migration from legacy systems
-- **Compliance**: Meet regulatory requirements for data location
-- **Cost Optimization**: Optimize costs across different platforms
-
-#### Challenges
-- **Complexity**: Managing multiple authentication systems
-- **Integration**: Ensuring seamless integration between systems
-- **Security**: Maintaining security across multiple platforms
-- **Compliance**: Meeting compliance requirements across systems
-
-## 7. Authentication Compliance and Standards
-
-### Regulatory Requirements
-
-#### GDPR (General Data Protection Regulation)
-- **Consent**: Explicit consent for data processing
-- **Data Minimization**: Collect only necessary data
-- **Right to Erasure**: Users can request data deletion
-- **Data Portability**: Users can export their data
-- **Privacy by Design**: Privacy built into system design
-
-#### HIPAA (Health Insurance Portability and Accountability Act)
-- **Access Controls**: Restrict access to health information
-- **Audit Logs**: Comprehensive logging of access
-- **Authentication**: Strong authentication requirements
-- **Encryption**: Encrypt data in transit and at rest
-- **Session Management**: Secure session handling
-
-#### PCI-DSS (Payment Card Industry Data Security Standard)
-- **Strong Authentication**: Multi-factor authentication
-- **Access Control**: Restrict access to cardholder data
-- **Monitoring**: Continuous monitoring of access
-- **Encryption**: Encrypt cardholder data
-- **Vulnerability Management**: Regular security assessments
-
-### Industry Standards
-
-#### NIST Cybersecurity Framework
-- **Identify**: Understand cybersecurity risks
-- **Protect**: Implement safeguards
-- **Detect**: Identify cybersecurity events
-- **Respond**: Take action on detected events
-- **Recover**: Maintain resilience and restore capabilities
-
-#### ISO 27001 (Information Security Management)
-- **Risk Assessment**: Identify and assess security risks
-- **Security Controls**: Implement appropriate controls
-- **Monitoring**: Monitor and review security measures
-- **Continuous Improvement**: Continuously improve security
-
-#### OWASP Authentication Cheat Sheet
-- **Password Security**: Strong password policies and storage
-- **Session Management**: Secure session handling
-- **Multi-Factor Authentication**: Implement MFA
-- **Account Recovery**: Secure account recovery processes
-- **Logging and Monitoring**: Comprehensive audit logging
-
-## 8. Authentication Best Practices
-
-### Design Principles
-
-#### User-Centric Design
-- **User Experience**: Prioritize user experience in authentication design
-- **Accessibility**: Ensure authentication is accessible to all users
-- **Inclusivity**: Design for diverse user populations
-- **Usability**: Make authentication easy to understand and use
-
-#### Security by Design
-- **Threat Modeling**: Identify and address security threats early
-- **Secure Defaults**: Default to secure configurations
-- **Defense in Depth**: Implement multiple security layers
-- **Fail Securely**: Handle failures in a secure manner
-
-#### Privacy by Design
-- **Data Minimization**: Collect only necessary data
-- **Purpose Limitation**: Use data only for intended purposes
-- **Transparency**: Be transparent about data collection and use
-- **User Control**: Give users control over their data
-
-### Implementation Guidelines
-
-#### Password Security
-- **Strong Policies**: Enforce strong password requirements
-- **Secure Storage**: Use strong hashing algorithms
-- **Regular Updates**: Encourage regular password updates
-- **Breach Monitoring**: Monitor for password breaches
-
-#### Multi-Factor Authentication
-- **Multiple Factors**: Use different types of factors
-- **User Choice**: Allow users to choose preferred factors
-- **Backup Options**: Provide backup authentication methods
-- **User Education**: Educate users about MFA benefits
-
-#### Session Management
-- **Secure Sessions**: Use secure session management
-- **Session Expiration**: Implement appropriate timeouts
-- **Session Fixation**: Prevent session fixation attacks
-- **Secure Logout**: Ensure secure session termination
-
-### Operational Best Practices
-
-#### Monitoring and Logging
-- **Comprehensive Logging**: Log all authentication events
-- **Real-Time Monitoring**: Monitor for suspicious activity
-- **Alerting**: Set up alerts for security events
-- **Incident Response**: Have incident response procedures
-
-#### Regular Assessments
-- **Security Audits**: Regular security assessments
-- **Penetration Testing**: Regular penetration testing
-- **Vulnerability Scanning**: Regular vulnerability scans
-- **Compliance Reviews**: Regular compliance assessments
-
-#### User Education
-- **Security Awareness**: Regular security awareness training
-- **Phishing Awareness**: Educate users about phishing
-- **Password Hygiene**: Teach good password practices
-- **Incident Reporting**: Encourage reporting of security incidents
-
-## 9. Emerging Authentication Trends
-
-### Biometric Authentication
-
-#### Current State
-- **Fingerprint Recognition**: Widely adopted on mobile devices
-- **Facial Recognition**: Increasingly common for device unlocking
-- **Voice Recognition**: Used for voice assistants and some applications
-- **Iris Scanning**: High-security applications
-
-#### Future Trends
-- **Behavioral Biometrics**: Typing patterns, gait analysis
-- **Continuous Biometrics**: Continuous authentication using biometrics
-- **Multi-Modal Biometrics**: Combining multiple biometric factors
-- **Privacy-Preserving Biometrics**: Biometrics without storing raw data
-
-### Blockchain-Based Authentication
-
-#### Decentralized Identity
-- **Self-Sovereign Identity**: Users control their own identity
-- **Decentralized Identifiers**: Globally unique identifiers
-- **Verifiable Credentials**: Cryptographically verifiable credentials
-- **Zero-Knowledge Proofs**: Prove identity without revealing data
-
-#### Benefits
-- **User Control**: Users control their own identity
-- **Privacy**: Enhanced privacy through cryptographic techniques
-- **Interoperability**: Works across different systems
-- **Resilience**: No single point of failure
-
-#### Challenges
-- **Complexity**: Complex to implement and use
-- **Scalability**: Performance and scalability challenges
-- **Adoption**: Limited adoption and ecosystem
-- **Regulation**: Regulatory uncertainty
-
-### AI-Powered Authentication
-
-#### Machine Learning Applications
-- **Risk Assessment**: AI-powered risk scoring
-- **Behavioral Analysis**: Machine learning for behavioral biometrics
-- **Anomaly Detection**: AI for detecting suspicious activity
-- **Adaptive Authentication**: Dynamic authentication based on AI analysis
-
-#### Benefits
-- **Improved Security**: Better detection of threats
-- **User Experience**: Reduced friction for legitimate users
-- **Adaptability**: Continuously improving security
-- **Efficiency**: Automated security decisions
-
-#### Challenges
-- **Privacy**: Privacy concerns with AI analysis
-- **Bias**: Potential for algorithmic bias
-- **Transparency**: Difficulty explaining AI decisions
-- **Adversarial Attacks**: AI systems can be manipulated
-
-### Quantum-Resistant Authentication
-
-#### Quantum Computing Threat
-- **Cryptographic Vulnerabilities**: Quantum computers can break current cryptography
-- **Timeline**: Quantum computers may be available in 10-20 years
-- **Preparation**: Need to prepare for quantum threats now
-- **Migration**: Gradual migration to quantum-resistant algorithms
-
-#### Quantum-Resistant Solutions
-- **Lattice-Based Cryptography**: Based on mathematical lattice problems
-- **Hash-Based Signatures**: Based on cryptographic hash functions
-- **Code-Based Cryptography**: Based on error-correcting codes
-- **Multivariate Cryptography**: Based on multivariate polynomial systems
-
-#### Implementation Considerations
-- **Algorithm Selection**: Choose appropriate quantum-resistant algorithms
-- **Performance**: Consider performance implications
-- **Interoperability**: Ensure compatibility with existing systems
-- **Migration Strategy**: Plan for gradual migration
-
-## 10. Authentication in Different Contexts
-
-### Web Application Authentication
-
-#### Web-Specific Challenges
-- **Stateless Nature**: HTTP is stateless, requiring session management
-- **Cross-Site Attacks**: CSRF, XSS, and other web-specific attacks
-- **Browser Security**: Browser security model limitations
-- **Mobile Compatibility**: Authentication across different devices
-
-#### Web Authentication Patterns
-- **Session-Based**: Traditional web session management
-- **Token-Based**: JWT and other token-based approaches
-- **OAuth 2.0**: Authorization framework for web applications
-- **SAML**: Enterprise SSO for web applications
-
-### Mobile Application Authentication
-
-#### Mobile-Specific Considerations
-- **Device Security**: Leverage device security features
-- **Biometric Integration**: Use device biometric capabilities
-- **Offline Authentication**: Handle offline scenarios
-- **App Store Requirements**: Meet app store security requirements
-
-#### Mobile Authentication Patterns
-- **Biometric Authentication**: Fingerprint, face ID, touch ID
-- **App-Specific Authentication**: In-app authentication flows
-- **Device Registration**: Register devices for authentication
-- **Push Notifications**: Push-based authentication
-
-### IoT Device Authentication
-
-#### IoT-Specific Challenges
-- **Resource Constraints**: Limited processing power and memory
-- **Network Security**: Insecure network environments
-- **Device Diversity**: Wide variety of device types
-- **Long Lifespan**: Devices may be deployed for years
-
-#### IoT Authentication Patterns
-- **Certificate-Based**: X.509 certificates for device authentication
-- **Token-Based**: Lightweight tokens for IoT devices
-- **Device Registration**: Secure device registration process
-- **Group Authentication**: Authenticate groups of devices
-
-### API Authentication
-
-#### API-Specific Requirements
-- **Stateless**: APIs are typically stateless
-- **Rate Limiting**: Prevent abuse through rate limiting
-- **Scope-Based**: Granular permission control
-- **Audit Logging**: Comprehensive logging for compliance
-
-#### API Authentication Patterns
-- **API Keys**: Simple authentication for public APIs
-- **OAuth 2.0**: Standard authorization framework for APIs
-- **JWT Tokens**: Self-contained tokens for API authentication
-- **Mutual TLS**: Certificate-based authentication for APIs
-
-## Conclusion
-
-Authentication is a complex and evolving field that requires understanding of multiple concepts, technologies, and best practices. This document provides a comprehensive foundation for understanding authentication theory and concepts.
-
-### Key Takeaways
-
-1. **Multi-Layered Approach**: Authentication should use multiple layers of security
-2. **User-Centric Design**: Balance security with user experience
-3. **Continuous Evolution**: Stay updated with emerging trends and threats
-4. **Compliance Awareness**: Understand and meet regulatory requirements
-5. **Security by Design**: Integrate security into the design process
-6. **Monitoring and Response**: Implement comprehensive monitoring and incident response
-
-### Future Directions
-
-- **Passwordless Authentication**: Continued move toward passwordless solutions
-- **Biometric Integration**: Increased use of biometric authentication
-- **AI and ML**: More sophisticated AI-powered authentication systems
-- **Quantum Resistance**: Preparation for quantum computing threats
-- **Decentralized Identity**: Growth of blockchain-based identity solutions
-
-Authentication will continue to evolve as new technologies emerge and threats change. Staying informed about these developments is essential for building secure and user-friendly authentication systems. 
+### Authentication vs. authorization
+- **Authentication (AuthN)**: "Who are you?" — identity verification, the security perimeter around a resource.
+- **Authorization (AuthZ)**: "What are you allowed to do?" — permission management, evaluated *after* authentication succeeds.
+
+They're often implemented together (a JWT can carry both an identity claim and a roles claim) but are conceptually and often architecturally separate — a system can authenticate someone correctly and still authorize them incorrectly (over-permissive roles), and vice versa (correct permission model, but weak identity verification lets an impostor in as a legitimate user).
+
+### The three authentication factors
+
+| Factor | Examples | Strength | Weakness |
+|---|---|---|---|
+| **Knowledge** (something you know) | Password, PIN, security question | Cheap, universally implementable | Guessable, phishable, reusable if leaked, forgettable |
+| **Possession** (something you have) | Hardware token (YubiKey), authenticator app, SMS/email code | Meaningfully harder to remotely compromise than knowledge alone | Can be lost/stolen; SMS specifically is vulnerable to SIM-swapping |
+| **Inherence** (something you are) | Fingerprint, face, voice, behavioral biometrics | Can't be forgotten or (easily) shared | Irrevocable if compromised — you can't rotate a fingerprint; privacy/legal weight; requires specialized hardware |
+
+**Multi-factor authentication (MFA)** combines factors from *different* categories — a password plus a TOTP code is 2FA (knowledge + possession); a password plus a security question is not meaningfully stronger, since both are knowledge factors an attacker who phishes one can often phish the other. **Adaptive MFA** varies which/how many factors are required based on assessed risk (see risk-based authentication below) rather than applying the same static requirement to every login. See [Advanced Authentication Concepts.md](<Advanced Authentication Concepts.md>) for how TOTP-based MFA compares to phishing-resistant passkeys — the two are not equivalent despite both being "a second factor."
+
+MFA's real security benefit is forcing an attacker to compromise two independent channels simultaneously — a leaked password database alone becomes far less useful. The costs are real too: added login friction, more complex account-recovery flows (what happens when someone loses their second factor?), and — for SMS-based OTP specifically — a genuinely weaker security profile than app-based TOTP or hardware keys, since SMS delivery is interceptable via SIM-swap social engineering attacks against the carrier, not just the target.
+
+## 2. Protocols — conceptual roles, not mechanics
+
+This repo has dedicated files for the mechanics of each protocol below. This section exists to explain *why* each protocol exists and where it fits, not to re-explain request/response formats.
+
+- **OAuth 2.0** — delegated *authorization*: lets a client get scoped access to a resource without the user's password. See [3-Oauth Guide.md](<3-Oauth Guide.md>) for roles, flows, PKCE, and tokens.
+- **OpenID Connect (OIDC)** — adds an identity layer on top of OAuth 2.0 (the `id_token`), turning OAuth's authorization into actual authentication. Detailed in both [3-Oauth Guide.md](<3-Oauth Guide.md>) and [Advanced Authentication Concepts.md](<Advanced Authentication Concepts.md>).
+- **SAML** — XML-based, enterprise-focused SSO/authentication standard, predates OAuth. Full flow and component breakdown in [Advanced Authentication Concepts.md](<Advanced Authentication Concepts.md>).
+- **WebAuthn / passkeys** — public-key-based passwordless authentication, phishing-resistant by design. Full conceptual and mechanical treatment (registration/authentication ceremonies, why it resists phishing, comparison to TOTP) in [Advanced Authentication Concepts.md](<Advanced Authentication Concepts.md>).
+- **JWT** — the token *format* most of the above protocols use to carry claims. Structure, revocation strategies, and algorithm attacks in [2-Comprehensive Guide to JSON Web Tokens (JWT).md](<2-Comprehensive Guide to JSON Web Tokens (JWT).md>).
+
+### Session vs. token-based — the conceptual trade-off
+The fundamental split in how identity is remembered across requests:
+
+| | Session-based | Token-based |
+|---|---|---|
+| Where state lives | Server (session store) | Client (self-contained token) |
+| Revocation | Immediate — delete the server record | Delayed unless extra machinery added (see JWT file) |
+| Scaling model | Needs a shared store once you have >1 server | Scales without shared state |
+| Primary risk | CSRF, session hijacking | Token theft, replay |
+
+This is the single most consequential early architectural decision in an auth system, because it determines whether "log this user out everywhere, right now" is trivial (session-based) or requires deliberate engineering (token-based — see the JWT file's revocation section). Full mechanics of both: [1-authentication.md](<1-authentication.md>).
+
+## 3. Threat models and security principles
+
+### Common authentication threats
+- **Credential theft** — passwords/tokens stolen via breach, phishing, malware, or interception.
+- **Session/token hijacking** — an attacker obtains a valid session ID or token and rides it.
+- **Man-in-the-middle** — interception of authentication traffic in transit (mitigated by TLS everywhere, HSTS, certificate pinning for high-value clients).
+- **Brute force / credential stuffing** — systematic guessing, or replaying breached credentials from other sites against yours (this is why password reuse is dangerous even for "unimportant" accounts).
+- **Social engineering / phishing** — manipulating a human into handing over credentials or approving a fraudulent MFA prompt ("MFA fatigue" attacks — spamming push approval requests until the user taps "approve" out of annoyance — are a live, common attack pattern against push-based MFA specifically).
+
+### Defense in depth
+No single control should be the only thing standing between an attacker and an account. Layer network security (TLS, firewalls), application security (input validation, output encoding), authentication security (strong hashing, MFA), session security (secure cookies, rotation), and monitoring (logging, alerting) — a failure in any one layer shouldn't be a total compromise.
+
+### Other governing principles
+- **Principle of least privilege** — grant the minimum access necessary; this is an authorization concern but authentication design should make it easy to enforce (fine-grained scopes/roles in the token or session, not one flat "authenticated" bit).
+- **Fail-safe defaults** — a system should default to *denying* access; explicit action should be required to grant it, never the reverse.
+- **Security by design** — threat-model authentication flows at design time, not as a retrofit; secure defaults are cheaper than defense-in-depth added after a breach.
+
+### Common implementation vulnerabilities
+Weak/reused passwords, insecure storage (plaintext or weak hashing — always bcrypt/scrypt/Argon2, never raw SHA-256 for passwords), insufficient rate limiting (enables brute force), predictable or non-expiring session IDs, and token security gaps (no expiration, no revocation path, no algorithm pinning — see the JWT file for the concrete attacks these gaps enable).
+
+## 4. Advanced theoretical concepts
+
+### Zero-knowledge proofs
+A cryptographic technique letting one party (the prover) convince another (the verifier) that they know a secret — without revealing the secret itself. Three defining properties: **completeness** (a true statement is always accepted from an honest prover), **soundness** (a false statement can't be proven by a cheating prover, except with negligible probability), and **zero-knowledge** (the verifier learns nothing beyond "the statement is true").
+
+Practical variants: **zk-SNARKs** (succinct, non-interactive — practical for blockchain use since proofs are small and verification is fast), **zk-STARKs** (similar goal, avoids the "trusted setup" requirement SNARKs have, at the cost of larger proof sizes), **Bulletproofs** (efficient for range proofs specifically, e.g. "this value is between 0 and 100 without revealing the value"). Authentication use cases remain mostly niche/blockchain-adjacent today (proving credential possession without revealing the credential, privacy-preserving identity verification, voting eligibility) rather than mainstream web auth — but the underlying idea (proving a fact without exposing the data behind it) is conceptually the same spirit as WebAuthn's "prove possession of a private key without ever transmitting it."
+
+### Risk-based authentication (RBA)
+Instead of applying the same static authentication requirement to every login, RBA scores each attempt against contextual signals and scales requirements to match:
+
+- **Location** — geographic distance from the user's usual locations, IP reputation, VPN/Tor usage.
+- **Device** — is this a recognized device fingerprint, or a first-time browser/OS combination?
+- **Time** — login at 3am local time when the user has never done so before is a weaker signal alone, but compounds with others.
+- **Behavior** — typing cadence, mouse movement patterns (see continuous authentication below).
+- **Network** — known-malicious IP ranges, unexpected ASN changes mid-session.
+
+Scoring approaches range from simple rule-based thresholds ("+0.3 risk if country changed since last login") to ML-based models trained on historical legitimate-vs-fraudulent session data, with hybrid approaches common in practice. The payoff is asymmetric friction: low-risk logins pass through with just a password, medium-risk logins get an MFA challenge, high-risk logins get MFA plus a CAPTCHA or get blocked outright pending manual review — reducing friction for the vast majority of legitimate logins while concentrating security cost where the risk actually is.
+
+### Continuous authentication
+Rather than authenticating once at login and trusting the session indefinitely, continuous authentication monitors behavioral signals *throughout* the session to detect if control has silently changed hands (a stolen unlocked laptop, a hijacked session token being used by someone other than the original user).
+
+Signals: keystroke dynamics (timing/rhythm, not just content), mouse movement patterns, which applications/features are used and how, network behavior. A behavioral profile is built over time; live sessions are compared against it, and significant deviation triggers a step-up challenge (re-enter password, provide a second factor) rather than an immediate hard logout. Real challenges: privacy (this is inherently invasive monitoring, and needs to be disclosed and scoped carefully), false positives (a legitimately tired or injured user typing differently shouldn't get logged out mid-task), and performance overhead of continuous client-side monitoring.
+
+### Passwordless authentication — landscape
+"Passwordless" is an umbrella covering several distinct mechanisms with very different security properties — worth distinguishing rather than treating as one bucket:
+
+- **Magic links** — a one-time link emailed/texted to a known address; security reduces to the security of that email/SMS channel (if the mailbox is compromised, so is the account).
+- **Push notifications** — approve/deny a login on a trusted, already-authenticated device; vulnerable to MFA-fatigue attacks (see above) if not paired with number-matching.
+- **Hardware tokens / passkeys (WebAuthn)** — public-key cryptography, phishing-resistant by construction. This is the strongest category and the one worth understanding in depth — see [Advanced Authentication Concepts.md](<Advanced Authentication Concepts.md>) for the full explanation of what a passkey actually is and why it resists phishing where OTP and magic links don't.
+
+The common thread across all passwordless methods is eliminating the shared-secret-typed-into-a-form pattern that makes passwords phishable — but "passwordless" alone doesn't guarantee phishing resistance (magic links and non-number-matching push notifications can both still be socially engineered); only public-key-based methods like WebAuthn make phishing structurally impossible rather than just less convenient.
+
+## 5. Architecture patterns
+
+### Centralized authentication (Identity Provider pattern)
+One system (an IdP — Okta, Auth0, an internal identity service) is the single source of truth for identity; other applications federate to it rather than each maintaining their own user store. This is what SSO is built on.
+
+**Benefits**: consistent policy enforcement across every connected app, one place to disable a compromised or offboarded account, reduced administrative overhead. **Costs**: the IdP becomes a single point of failure (if it's down, nobody can log into anything), it must scale to handle every app's authentication load, and switching IdPs later is a significant migration.
+
+### Distributed authentication (microservices pattern)
+Each service authenticates independently, or authentication is centralized only at an API gateway that then propagates a validated identity (often a JWT) to downstream services — this is why stateless tokens are the dominant pattern in microservice architectures (see the session-vs-token trade-off above: no service needs to share a session store with any other).
+
+**Benefits**: independent scaling and failure isolation per service, flexibility to use different auth methods per service if genuinely needed (rare in practice — consistency is usually worth more than flexibility here). **Costs**: larger attack surface (more services independently handling tokens/credentials), harder to guarantee consistent enforcement, and distributed logging/monitoring becomes necessary just to answer "who did what, where" across the system.
+
+### Hybrid / multi-cloud authentication
+Federating between cloud IdPs (AWS Cognito, Azure AD/Entra ID, Google Identity) and on-premises directories (Active Directory, LDAP) during a cloud migration, or permanently for regulatory/data-residency reasons. **Benefits**: flexibility to pick the best-fit method per use case, a gradual migration path off legacy systems. **Costs**: real operational complexity in keeping multiple systems' user data synchronized and consistently secured — this is where a lot of real-world auth incidents originate, in the seams between systems rather than within any single one.
+
+## 6. Compliance and standards
+
+Compliance requirements are a major real-world driver of authentication design decisions — often more binding in practice than pure security preference, since they're externally audited.
+
+| Regime | Authentication-relevant requirements |
+|---|---|
+| **GDPR** | Explicit consent for data processing, data minimization (collect only what's needed for auth, not more), right to erasure, privacy-by-design |
+| **HIPAA** | Strong authentication for health data access, comprehensive audit logs, encryption in transit and at rest, secure session handling |
+| **PCI-DSS** | Multi-factor authentication is effectively mandatory for cardholder data access, strict access control, continuous monitoring |
+| **NIST Cybersecurity Framework** | Identify → Protect → Detect → Respond → Recover — a lifecycle model, not just a design-time checklist |
+| **OWASP Authentication Cheat Sheet** | Practical, implementation-level guidance: password policy, session management, MFA, account recovery, logging — see [Authentication Security Best Practices.md](<Authentication Security Best Practices.md>) for concrete implementations of most of this |
+
+The practical takeaway: design for the strictest regime you're plausibly subject to from the start (MFA, audit logging, encryption at rest/in transit) rather than retrofitting compliance later — retrofitting audit logging into a system that wasn't designed to produce it is materially harder than building it in from day one.
+
+## 7. Authentication across contexts
+
+Different platforms create genuinely different constraints, not just different UI:
+
+- **Web** — HTTP's statelessness is the root reason session/token mechanisms exist at all; browser-specific attack surface (CSRF, XSS) shapes cookie flag choices (`HttpOnly`, `SameSite`).
+- **Mobile** — can lean on OS-level secure storage (Keychain/Keystore) and biometric APIs the OS already trusts, but must handle offline scenarios and app-store review requirements around how credentials are stored.
+- **IoT** — often severely resource-constrained (can't run a full TLS stack or store large certificates), frequently deployed for years without physical access for updates, so the auth mechanism chosen at manufacture time needs to remain sound for that whole lifespan — certificate-based (X.509) device identity is the common answer, since it doesn't require ongoing interactive login.
+- **APIs** — inherently stateless by convention even when the underlying mechanism (session cookies) technically supports state; scope-based permission models and rate limiting matter more here than in human-facing login flows, since API clients don't self-limit their request rate the way a human clicking a login button does.
+
+## Key takeaways
+
+1. Authentication should layer multiple defenses — no single control is sufficient (defense in depth).
+2. Session-vs-token is the foundational early architectural choice; it determines how hard revocation is later.
+3. Threat modeling and compliance requirements should shape the design from the start, not get bolted on afterward.
+4. Passwordless/phishing-resistant methods (passkeys) are where the field is heading — see [Advanced Authentication Concepts.md](<Advanced Authentication Concepts.md>) for the deep dive.
+5. Architecture shape (centralized/distributed/hybrid) has real, different trade-offs — pick deliberately based on the system's actual failure and scaling requirements, not by default.
+
+## Further reading
+- [1-authentication.md](<1-authentication.md>) — concrete mechanism catalog and comparison table.
+- [2-Comprehensive Guide to JSON Web Tokens (JWT).md](<2-Comprehensive Guide to JSON Web Tokens (JWT).md>) — JWT structure, revocation, algorithm attacks.
+- [3-Oauth Guide.md](<3-Oauth Guide.md>) — OAuth 2.0 flows, PKCE, OIDC.
+- [Advanced Authentication Concepts.md](<Advanced Authentication Concepts.md>) — WebAuthn/passkeys, SAML, ZKP implementations, risk-based auth implementations.
+- [Authentication Security Best Practices.md](<Authentication Security Best Practices.md>) — concrete implementation of the OWASP/compliance guidance summarized above.

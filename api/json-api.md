@@ -19,6 +19,27 @@ JSON:API addresses common challenges in REST API design:
 - **Client-Driven**: Clients can request specific fields, relationships, or pagination, reducing over/under-fetching.
 - **Interoperability**: Works across languages and frameworks, with libraries for Python, Ruby, JavaScript, etc.
 
+### What JSON:API Gives You Over Plain Ad-Hoc JSON
+Most "REST APIs" return whatever JSON shape felt natural to whoever wrote the endpoint — one team nests errors under `error`, another under `errors`, another just sets a non-2xx status and hopes the client checks it. That inconsistency is exactly what JSON:API eliminates. Concretely, adopting the spec buys you:
+
+- **A standardized envelope.** Every response — success or failure — has the same top-level shape (`data`, `included`, `errors`, `meta`, `links`). A client library can be written once and reused against any JSON:API-compliant backend, because it knows exactly where to look for the primary resource, related resources, and error details, without reading that specific API's bespoke docs.
+- **Relationships and `include` as a first-class concept**, not an afterthought. Ad-hoc APIs solve "give me an article and its author" in a dozen different incompatible ways (nested objects, separate `author_id` field, a totally separate endpoint). JSON:API standardizes it as `?include=author`, with the related resource deduplicated into a top-level `included` array — so if 20 articles share 1 author, that author is serialized once, not 20 times.
+- **Sparse fieldsets as a built-in, spec-defined mechanism** (`?fields[articles]=title,summary`) rather than each team inventing its own `?select=` or `?fields=` convention with different syntax and semantics.
+- **A single, consistent error format** (`status`, `code`, `title`, `detail`, `source.pointer`) instead of every endpoint deciding independently whether an error is a string, an object, or an array of objects.
+- **Off-the-shelf tooling.** Because the wire format is standardized, generic client libraries (Ember Data, `jsonapi-serializer`) and server libraries (JSONAPI::Resources, Django REST + JSON:API renderers) can do the serialization/deserialization work for you — you're not hand-rolling pagination links or compound-document logic per project.
+
+### When It's Worth Adopting vs. Overkill
+**Worth it when:**
+- You're building a data-heavy client (an SPA framework like Ember, a mobile app) that benefits from a generic client library doing automatic caching/normalization of resources and relationships.
+- Your data model has real, frequently-traversed relationships (articles → authors → comments) and you're tired of either massively over-fetching (nested JSON blobs) or under-fetching (N+1 client-side requests) with an ad-hoc REST design.
+- Multiple teams/clients consume the same API and you want a contract precise enough that generic tooling — not custom per-endpoint glue code — can consume it.
+
+**Overkill when:**
+- It's a small, low-relationship API (a handful of flat CRUD resources) — the `type`/`id`/`attributes` wrapping is pure ceremony with no payoff.
+- You control both client and server tightly and can already agree on a simpler ad-hoc shape without needing a formal spec to enforce consistency.
+- Payload size matters a lot and you can't afford JSON:API's verbosity — the `type`, `id`, `attributes`, `relationships`, `links` wrapper is noticeably heavier per-resource than a flat JSON object, which matters at high volume or on constrained bandwidth.
+- Your clients want to shape queries themselves in ways JSON:API doesn't naturally support (deep nested filtering, computed fields) — that's GraphQL's niche, not JSON:API's.
+
 ### JSON:API vs. REST and gRPC
 | Feature                | JSON:API                          | REST                              | gRPC                              |
 |------------------------|-----------------------------------|-----------------------------------|-----------------------------------|

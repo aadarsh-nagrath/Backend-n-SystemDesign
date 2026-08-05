@@ -1,157 +1,159 @@
-## SSL/TLS: Complete Guide for Backend Engineers
+# SSL/TLS
 
-This guide explains SSL/TLS end to end: concepts, how it works, why it matters, certificate types and validation, modern TLS versions and cipher suites, mutual TLS, SNI/ECH, ALPN and HTTP/2/3, configuration examples for Nginx and Apache, automation with ACME/Certbot, hardening, troubleshooting, and best practices.
+TLS is what turns HTTP into HTTPS — the protocol that encrypts, authenticates, and checks the integrity of data between a client and a server. This is the mechanics file: the handshake step by step, certificate chains and validation, cipher suites, mutual TLS, and server configuration. For the practical HTTP-layer side (redirects, HSTS, mixed content), see `https.md`.
 
-### What is SSL? What is TLS?
-- **SSL (Secure Sockets Layer)** is the original web encryption protocol from the 1990s. It is deprecated and insecure (SSLv2/SSLv3 must not be used).
-- **TLS (Transport Layer Security)** is the modern successor. Today “SSL” is commonly used as shorthand for TLS, but implementations should use TLS 1.2+ (prefer TLS 1.3).
-- Websites using TLS advertise `https://` and the browser shows a lock icon.
+## TL;DR
+- **SSL** is the deprecated 1990s predecessor; **TLS** is the modern protocol. "SSL" is still used colloquially to mean TLS — but never actually deploy SSLv2/SSLv3.
+- TLS combines **asymmetric crypto** (for authentication and initial key exchange — slow but solves the "how do we agree on a secret with no prior shared secret" problem) with **symmetric crypto** (fast, used for the actual data once a shared key exists).
+- The handshake's job: agree on a protocol version and cipher suite, authenticate the server via its certificate, and derive a shared symmetric key — all before a byte of application data moves.
+- TLS 1.3 cuts the handshake to 1 round trip (down from 2 in TLS 1.2), removes legacy/weak ciphers, and is always forward-secret.
+- Certificate validation means checking: is it signed by a CA my client trusts, is it for the right hostname, has it expired, has it been revoked.
+- Use TLS 1.2 (compatibility) and TLS 1.3 (preferred); disable everything older.
 
-### HTTP vs HTTPS
-- **HTTP** transmits data in plaintext; eavesdroppers can read or modify it.
-- **HTTPS (HTTP over TLS)** encrypts and authenticates data in transit, preventing interception and tampering, and authenticating the server’s identity.
+## What is SSL? What is TLS?
 
-### Why SSL/TLS is Important
-- **Confidentiality**: Encryption prevents eavesdropping (credit cards, credentials, PII).
-- **Integrity**: Detects/blocks tampering (man-in-the-middle, proxies changing content).
-- **Authentication**: Certificates bind a domain to a public key; clients verify server identity.
-- **Trust/UI**: Browsers flag non‑HTTPS as "Not Secure"; some APIs require HTTPS only.
+- **SSL (Secure Sockets Layer)** — the original web encryption protocol, introduced by Netscape in the 1990s to secure early e-commerce. Deprecated and insecure; SSLv2 and SSLv3 must never be used (SSLv3 is broken by the POODLE attack).
+- **TLS (Transport Layer Security)** — the modern successor, standardized by the IETF starting in 1999 as a renamed, cleaned-up continuation of SSL 3.0. "SSL" persists as informal shorthand for TLS in casual usage (certs are still commonly called "SSL certificates"), but actual deployments should run TLS 1.2 or, preferably, TLS 1.3.
+- A site running TLS correctly serves `https://` and browsers show a padlock in the address bar.
 
-#### Why Most Websites Require HTTPS Today
-Modern web security demands HTTPS for several reasons:
-- **Browser enforcement**: Browsers flag HTTP sites as "Not Secure" and block many features (geolocation, camera, etc.) on HTTP
-- **SEO impact**: Search engines prioritize HTTPS sites in rankings
-- **API requirements**: Most modern APIs (REST, GraphQL) require HTTPS for security
-- **Regulatory compliance**: PCI DSS, GDPR, and other standards mandate encryption
-- **User trust**: Users expect the lock icon and green address bar
+### Timeline
 
----
+| Version | Year | Notes | Status today |
+|---|---|---|---|
+| SSL 1.0 | 1994 | Netscape's first attempt; never publicly released | Never used |
+| SSL 2.0 | 1995 | First public version, seriously flawed | Deprecated, insecure |
+| SSL 3.0 | 1996 | Improved handshake, still flawed | Deprecated (POODLE attack, 2014) |
+| TLS 1.0 | 1999 | IETF-standardized successor to SSL 3.0 | Deprecated by all major browsers since 2020 |
+| TLS 1.1 | 2006 | Fixed some CBC-mode vulnerabilities | Deprecated, not recommended |
+| TLS 1.2 | 2008 | Added AES, SHA-2; still widely deployed | Fine for compatibility; migrate to 1.3 where possible |
+| TLS 1.3 | 2018 | Faster handshake, hides more of the negotiation, drops weak ciphers | Preferred/default target |
 
-### How TLS Works (High Level)
-TLS provides:
-- Encryption using symmetric keys (fast) negotiated securely.
-- Authentication using X.509 certificates and a public key infrastructure (PKI).
-- Integrity via MACs or AEAD modes (e.g., AES‑GCM, ChaCha20‑Poly1305).
+## HTTP vs HTTPS
 
-#### TLS 1.2 Handshake (simplified)
-1) ClientHello → supported TLS versions, cipher suites, random, SNI, extensions
-2) ServerHello → chosen version/cipher, random; Certificate; (ServerKeyExchange if needed); ServerHelloDone
-3) Client verifies certificate chain (CA trust, hostname, validity, revocation)
-4) Key exchange (e.g., ECDHE) to derive shared secret
-5) Both sides generate symmetric keys; Finished messages verify handshake integrity
+- **HTTP** transmits data in plaintext — eavesdroppers can read or modify it in transit.
+- **HTTPS (HTTP over TLS)** encrypts and authenticates data in transit, preventing interception and tampering, and authenticating the server's identity. See `https.md` for redirects, HSTS, and mixed-content handling once TLS itself is configured.
 
-#### TLS 1.3 Handshake (faster, simpler)
-- 1‑RTT by default; supports 0‑RTT (replay‑risky; disable for state‑changing requests)
-- Removes legacy ciphers; uses AEAD only (AES‑GCM or ChaCha20‑Poly1305)
-- Always forward‑secret (ECDHE)
+## Why TLS matters
 
-#### Perfect Forward Secrecy (PFS)
-- Achieved via ephemeral Diffie‑Hellman (ECDHE). Protects past sessions if the server private key is later compromised.
+- **Confidentiality** — encryption prevents eavesdropping on credit cards, credentials, PII.
+- **Integrity** — detects/blocks tampering (man-in-the-middle proxies altering content in transit).
+- **Authentication** — certificates bind a domain to a public key; clients verify the server is who it claims to be.
+- **Trust/UI** — browsers flag non-HTTPS as "Not Secure"; some browser APIs require a secure context outright.
 
-#### Detailed TLS Handshake Walkthrough (TLS 1.2)
-Let's break down the TLS handshake step by step to understand how secure communication is established:
+### Why this is non-negotiable for modern sites
+- **Browser enforcement** — HTTP sites get flagged "Not Secure," and features like geolocation and camera/mic access are blocked outright on insecure origins.
+- **SEO** — search engines rank HTTPS sites higher.
+- **API requirements** — most modern REST/GraphQL APIs require HTTPS.
+- **Regulatory compliance** — PCI-DSS, GDPR, HIPAA effectively mandate encryption in transit.
+- **User trust** — users expect and look for the padlock.
 
-**Step 1: TCP Connection**
-- Browser establishes a TCP connection with the server (just like HTTP)
-- This is the foundation for the TLS handshake
+## How TLS works, conceptually
 
-**Step 2: Client Hello**
-- Client sends a "ClientHello" message containing:
-  - Supported TLS versions (1.2, 1.3, etc.)
-  - Supported cipher suites (encryption algorithms)
-  - Random data for security
-  - Server Name Indication (SNI) for virtual hosting
-  - Extensions (ALPN for HTTP/2, etc.)
+TLS provides three guarantees over the raw TCP connection:
+- **Encryption** using symmetric keys (fast), negotiated securely during the handshake.
+- **Authentication** using X.509 certificates and a public key infrastructure (PKI).
+- **Integrity** via MACs or AEAD modes (e.g., AES-GCM, ChaCha20-Poly1305) — tampering with ciphertext in transit is detectable.
 
-**Step 3: Server Hello**
-- Server responds with "ServerHello" containing:
-  - Chosen TLS version and cipher suite
-  - Server's random data
-- Server sends its certificate containing:
-  - Public key for the server
-  - Domain name and validity period
-  - Digital signature from Certificate Authority
-- Server may send additional messages (ServerKeyExchange, CertificateRequest)
+### Why both asymmetric and symmetric crypto
 
-**Step 4: Client Certificate Verification**
-- Client verifies the server's certificate:
-  - Checks if it's signed by a trusted CA
-  - Validates the domain name matches
-  - Checks expiration date
-  - Verifies the certificate chain
+- **Asymmetric (public-key) encryption** (RSA/ECDSA/ECDHE): a keypair where one key encrypts and the other decrypts. Secure and solves the "no prior shared secret" bootstrap problem, but computationally expensive — too slow to encrypt an entire session's worth of data.
+- **Symmetric encryption** (AES, ChaCha20): a single shared key both sides use to encrypt/decrypt. Fast, but requires both sides to already have the same secret — which is exactly the problem asymmetric crypto solves.
+- **The solution**: use asymmetric crypto only for the handshake — authenticating the server and securely agreeing on a symmetric key — then switch to symmetric encryption for all actual data. You get the bootstrapping security of asymmetric crypto with the speed of symmetric crypto.
 
-**Step 5: Key Exchange**
-- Client generates a random session key (symmetric encryption key)
-- Client encrypts this session key using the server's public key
-- Client sends the encrypted session key to the server
-- Server decrypts the session key using its private key
-- Now both client and server have the same session key
+**The carrier pigeon analogy**: Alice (browser) wants to send Bob (server) a message, with Mallory (an attacker) able to intercept pigeons mid-flight.
+- **Naive/no encryption**: Alice ties a note to a pigeon in the clear. Mallory reads or swaps it — Bob has no way to know.
+- **Symmetric key alone (like a Caesar cipher)**: Alice and Bob agree on a shift code so messages are unreadable to Mallory — but how do they agree on the code in the first place without Mallory seeing *that* exchange too? They can't, without another mechanism — this is exactly the "key distribution problem," and solving it naively is a man-in-the-middle opportunity.
+- **Asymmetric crypto (boxes and locks)**: Alice publishes an open box (public key) — anyone, including Mallory, can see it, but a certificate signed by a trusted party (Ted, the CA) proves the box really belongs to Alice. Bob locks his message in Alice's box and sends it back; only Alice's private key opens it. No shared secret had to be exchanged in the clear first.
+- **Hybrid (the actual answer)**: use the heavy, slow boxes (asymmetric) just once, to securely exchange a lightweight shared code (symmetric key) — then switch to the fast shared-code system for the actual conversation. This is precisely what TLS does: asymmetric crypto bootstraps a symmetric session key, then symmetric crypto carries the real traffic.
 
-**Step 6: Secure Communication**
-- Both sides use the session key and agreed cipher suite
-- All subsequent data is encrypted with this shared key
-- Communication is now secure and bidirectional
+## The TLS handshake, step by step
 
-**Why Asymmetric + Symmetric Encryption?**
-- **Asymmetric encryption** (RSA/ECDSA): Secure but computationally expensive
-- **Symmetric encryption** (AES): Fast but requires a shared secret
-- **Solution**: Use asymmetric encryption to securely exchange a symmetric key, then use symmetric encryption for all data
+### TLS 1.2 handshake (the classic 2-round-trip version)
 
-**TLS 1.3 Improvements**
-- Reduces handshake from 2 round trips to 1 (faster)
-- Removes RSA key exchange (uses only ECDHE for forward secrecy)
-- Eliminates many legacy cipher suites
-- Supports 0-RTT for even faster subsequent connections
+**Step 1 — TCP connection**: the browser opens a TCP connection to the server first, same as for plain HTTP. TLS then runs on top of this.
 
----
+**Step 2 — Client Hello**: the client sends a `ClientHello` containing:
+- Supported TLS versions
+- Supported cipher suites (encryption algorithm combinations it's willing to use)
+- A random value (used later in key derivation)
+- **SNI (Server Name Indication)** — the hostname being requested, needed so a server hosting multiple HTTPS sites on one IP knows which certificate to present
+- Extensions (e.g., ALPN, to negotiate HTTP/2)
 
-### Public Key Infrastructure (PKI) Basics
-- **Certificates (X.509)** bind identities (CN/SAN) to public keys.
-- **Certificate Authorities (CAs)** issue certs; browsers/OS maintain a trust store of roots.
-- **Chain of Trust**: leaf (your site) → intermediates → root (trusted by client).
-- **Validation**: clients check expiration, hostname, signature chain, and optionally revocation.
-- **Revocation**: OCSP/CRL; OCSP stapling improves privacy and performance.
+**Step 3 — Server Hello**: the server responds with:
+- The chosen TLS version and cipher suite (picked from what the client offered)
+- Its own random value
+- Its **certificate** — containing its public key, domain name, validity period, and a signature from a CA
+- Possibly additional messages (`ServerKeyExchange`, `CertificateRequest` for mTLS), then `ServerHelloDone`
 
----
+**Step 4 — Certificate verification**: the client checks the server's certificate:
+- Is it signed by a CA in the client's trust store (directly or via a chain of intermediates)?
+- Does the domain name (or a SAN entry) match the hostname being requested?
+- Is it within its validity period (not expired, not "not yet valid")?
+- Has it been revoked (via OCSP/CRL)?
 
-### Certificate Types
-- **By scope**:
-  - Single‑domain: one FQDN (e.g., `example.com` or `www.example.com`).
-  - Wildcard: one domain plus all first‑level subdomains (e.g., `*.example.com`).
-  - Multi‑domain (SAN/UCC): multiple FQDNs in one certificate.
-- **By validation level**:
-  - DV (Domain Validation): proves control of the domain (DNS/HTTP/Email). Fast, common.
-  - OV (Organization Validation): CA verifies organization details. Higher assurance.
-  - EV (Extended Validation): stringent vetting; distinct UI signals have largely diminished.
+**Step 5 — Key exchange**: the client generates a random symmetric session key, encrypts it using the server's public key (from the certificate), and sends it over. The server decrypts it with its private key. (Modern deployments use ephemeral Diffie-Hellman — ECDHE — instead of RSA key transport here, for forward secrecy; see below.) Both sides now hold the same symmetric key without it ever having traveled in plaintext.
 
-Key algorithms: RSA (2048/3072+), ECDSA (P‑256/P‑384; smaller, faster signatures). Many sites deploy both via dual‑certs for broad client compatibility.
+**Step 6 — Secure communication**: both sides use the negotiated symmetric key and cipher suite for all further data. `Finished` messages on both sides verify the handshake itself wasn't tampered with, by including a MAC over the handshake transcript.
 
----
+### TLS 1.3 handshake (faster, simpler)
 
-### Modern TLS Versions and Cipher Suites
-- Disable SSLv2, SSLv3, TLS 1.0, TLS 1.1. Support TLS 1.2 and TLS 1.3.
-- Prefer AEAD cipher suites: AES‑GCM or ChaCha20‑Poly1305.
-- Prioritize ECDHE for PFS. Offer both ECDSA and RSA certificates if possible.
+- **1-RTT by default** — client and server can agree on parameters and derive keys in a single round trip, versus TLS 1.2's two. TLS 1.3 achieves this by having the client guess/send its preferred key-exchange parameters in the first flight, rather than waiting for the server to pick first.
+- **0-RTT (optional)** — for resumed connections, the client can send application data in its very first flight, before the handshake even finishes. This is *replay-risky* (an attacker who captures a 0-RTT request can resend it) — disable 0-RTT for anything non-idempotent (state-changing requests like payments).
+- **AEAD ciphers only** — legacy/weak cipher suites are removed entirely from the protocol; you get AES-GCM or ChaCha20-Poly1305, full stop.
+- **Always forward-secret** — TLS 1.3 mandates ECDHE (ephemeral key exchange) for every handshake; static RSA key exchange is gone.
+- **More of the handshake is encrypted** — TLS 1.3 hides more of the negotiation (including the server certificate) from passive on-path observers compared to 1.2.
 
-Example hardened policy reference: see Mozilla SSL/TLS guidelines (intermediate/modern configs).
+### Perfect Forward Secrecy (PFS)
 
----
+Achieved via ephemeral Diffie-Hellman (ECDHE): each session negotiates a *fresh*, temporary key pair used only for that session's key derivation, then discarded. If the server's long-term private key is later stolen, past recorded sessions **cannot** be decrypted retroactively, because their session keys were never derivable from the long-term key alone — they depended on ephemeral values that no longer exist anywhere. Without PFS (e.g., old-style RSA key exchange), a compromised private key can decrypt every past session ever recorded, which is the scenario PFS specifically defeats.
 
-### Advanced Concepts
-- **SNI (Server Name Indication)**: Allows multiple HTTPS sites per IP. Essential for virtual hosting.
-- **ECH (Encrypted ClientHello)**: Encrypts SNI to protect the requested hostname from on‑path observers (emerging support).
-- **ALPN (Application‑Layer Protocol Negotiation)**: Negotiates HTTP/2 (`h2`) or HTTP/3 (`h3`).
-- **HTTP/2**: Multiplexed streams over one TCP+TLS connection; lower latency.
-- **HTTP/3 (QUIC)**: Runs over UDP with TLS 1.3; faster connection setup and loss recovery.
-- **HSTS**: Strict‑Transport‑Security header enforces HTTPS and blocks downgrade/stripping.
-- **mTLS (Mutual TLS)**: Clients present certificates for strong client authentication.
-- **0‑RTT**: TLS 1.3 early data; disable for non‑idempotent requests due to replay risk.
+## Public Key Infrastructure (PKI) basics
 
----
+- **Certificates (X.509)** bind an identity (Common Name / Subject Alternative Names) to a public key.
+- **Certificate Authorities (CAs)** issue certificates after verifying some level of control/ownership; browsers and operating systems ship a trust store of root CAs they trust by default.
+- **Chain of trust**: leaf certificate (your site) → one or more intermediate CA certificates → a root CA certificate the client already trusts. Servers must send the full chain (leaf + intermediates) — a missing intermediate is one of the most common real-world "cert works in some clients, fails in others" bugs, since some clients cache intermediates from prior connections and others don't.
+- **Validation** on the client side checks: expiration, hostname match, signature chain integrity up to a trusted root, and (optionally) revocation status.
+- **Revocation**: OCSP (Online Certificate Status Protocol) or CRLs (Certificate Revocation Lists) let a client check if a cert was revoked before its expiry (e.g., after a private key leak). **OCSP stapling** — the server periodically fetches its own OCSP response and includes ("staples") it directly in the handshake — improves both performance (client skips an extra round trip to the CA) and privacy (the CA doesn't see every client that's checking a given cert's status).
 
-### Config Examples
+## Certificate types
 
-#### Nginx (TLS 1.2/1.3, HTTP/2, HSTS)
+**By scope** (how many hostnames one certificate covers):
+- **Single-domain** — one FQDN (e.g., `example.com` or `www.example.com`, but not both unless listed as SANs).
+- **Wildcard** — covers one domain plus all first-level subdomains (`*.example.com` covers `api.example.com` but not `api.staging.example.com`).
+- **Multi-domain (SAN/UCC)** — multiple distinct FQDNs in a single certificate via the Subject Alternative Name extension.
+
+**By validation level** (how much the CA verified before issuing):
+
+| Type | Validation performed | Typical cost | Best for | Example issuer |
+|---|---|---|---|---|
+| **Domain Validation (DV)** | Proves control of the domain only (DNS/HTTP/email challenge) — automatable, minutes | Free–$10/yr | Blogs, personal sites, most APIs | Let's Encrypt |
+| **Organization Validation (OV)** | CA verifies the requesting organization's business documents | $50–$200/yr | E-commerce, apps handling user data | Sectigo OV |
+| **Extended Validation (EV)** | Strict legal/business vetting | $100–$500/yr | Banks, high-trust institutional sites | DigiCert EV |
+
+DV now covers the vast majority of certificates in the wild — automation (ACME/Let's Encrypt) made it essentially free and instant, and browsers stopped giving EV certificates a distinct UI treatment (the old "green address bar"), which reduced EV's practical user-facing benefit. OV/EV still carry more legal weight for organizational accountability, but they don't change the cryptographic strength of the connection itself — a DV cert encrypts exactly as strongly as an EV one.
+
+**Key algorithms**: RSA (2048-bit minimum, 3072+ for longer-term security) or ECDSA (P-256/P-384 — smaller keys and faster signature operations than RSA at equivalent security levels). Many production sites deploy **dual certificates** (both RSA and ECDSA) so older clients that don't support ECDSA still connect, while modern clients get ECDSA's performance benefit.
+
+## Modern TLS versions and cipher suites
+
+- Disable SSLv2, SSLv3, TLS 1.0, TLS 1.1 entirely. Support TLS 1.2 and TLS 1.3.
+- Prefer AEAD cipher suites: AES-GCM or ChaCha20-Poly1305 (ChaCha20 is notably faster on devices without AES hardware acceleration, e.g., some mobile chips).
+- Prioritize ECDHE key exchange for forward secrecy; offer both ECDSA and RSA certificates if broad client compatibility matters.
+- Reference: Mozilla's SSL/TLS configuration generator provides current "modern" and "intermediate" policy presets — use it over hand-rolling a cipher list from memory, since guidance shifts as attacks against specific ciphers are found.
+
+## Advanced concepts
+
+- **SNI (Server Name Indication)** — lets one IP address serve multiple HTTPS sites, each with its own certificate, by having the client announce the target hostname *before* the server picks which cert to present. Essential for any shared/virtual hosting setup.
+- **ECH (Encrypted ClientHello)** — encrypts the SNI field itself, so even the hostname being requested is hidden from on-path observers (SNI is otherwise sent in the clear even under TLS 1.3). Emerging support, not yet universal.
+- **ALPN (Application-Layer Protocol Negotiation)** — a TLS extension that negotiates the application protocol (`h2` for HTTP/2, `h3` for HTTP/3) during the handshake itself, avoiding an extra round trip to upgrade after connecting.
+- **HTTP/2** — multiplexes many requests over a single TCP+TLS connection, reducing per-request connection overhead.
+- **HTTP/3 (QUIC)** — runs over UDP with TLS 1.3 integrated into the transport handshake itself; faster connection setup and better loss recovery than TCP-based HTTP/2, especially on unreliable networks.
+- **mTLS (Mutual TLS)** — the client also presents a certificate, so the server authenticates the client too, not just the reverse. Common for service-to-service and B2B API auth.
+- **0-RTT** — see TLS 1.3 handshake above; disable for non-idempotent requests due to replay risk.
+
+## Config examples
+
+### Nginx (TLS 1.2/1.3, HTTP/2, HSTS)
 ```nginx
 server {
     listen 443 ssl http2;
@@ -189,7 +191,7 @@ ssl_verify_client on;                         # or optional
 ssl_client_certificate /etc/nginx/ca_chain.pem;
 ```
 
-HTTP/3 (QUIC) note (requires QUIC build):
+HTTP/3 (QUIC) note (requires a QUIC-enabled build):
 ```nginx
 server {
     listen 443 http3 reuseport;
@@ -198,7 +200,7 @@ server {
 }
 ```
 
-#### Apache httpd (TLS + HSTS + HTTP/2)
+### Apache httpd (TLS + HSTS + HTTP/2)
 ```apache
 <IfModule mod_ssl.c>
 <VirtualHost *:443>
@@ -233,10 +235,9 @@ SSLVerifyClient require
 SSLCACertificateFile /etc/apache2/ca_chain.pem
 ```
 
----
+## Automation: ACME and Let's Encrypt
 
-### Automation: ACME and Let’s Encrypt
-- Use ACME clients to obtain and renew certificates automatically.
+- Use ACME clients to obtain and renew certificates automatically — manual certificate management is how expired-cert outages happen.
 - **Certbot (Debian/Ubuntu)**:
 ```bash
 sudo apt install -y certbot python3-certbot-nginx   # or python3-certbot-apache
@@ -244,58 +245,61 @@ sudo certbot --nginx   -d example.com -d www.example.com --redirect --hsts --agr
 # or
 sudo certbot --apache  -d example.com -d www.example.com --redirect --hsts --agree-tos -m admin@example.com --non-interactive
 ```
-- **DNS‑01 challenges** for wildcards/complex setups; use DNS plugins (e.g., Cloudflare, Route53).
-- Ensure renewal timers run and reload servers on renewal (`--deploy-hook`).
+- **DNS-01 challenges** are required for wildcard certs (and useful for complex setups where the server isn't directly reachable on port 80); use a DNS provider plugin (Cloudflare, Route53, etc.).
+- Ensure renewal timers actually run and reload the web server on renewal (`--deploy-hook`) — a cert that renews on disk but is never reloaded into the running server process still expires from the client's perspective.
 
----
+## Security headers complementing TLS
 
-### Security Headers Complementing TLS
-- `Strict-Transport-Security` (HSTS): enforce HTTPS.
-- `X-Content-Type-Options: nosniff`: mitigate MIME sniffing.
-- `X-Frame-Options: DENY` or CSP `frame-ancestors`.
-- `Referrer-Policy: strict-origin-when-cross-origin`.
-- `Content-Security-Policy`: control allowed sources; prevents many XSS vectors.
+TLS secures the transport; these headers close related gaps at the HTTP layer:
+- `Strict-Transport-Security` (HSTS) — enforces HTTPS on future requests (full detail in `https.md`).
+- `X-Content-Type-Options: nosniff` — mitigates MIME-type sniffing.
+- `X-Frame-Options: DENY` or CSP `frame-ancestors` — clickjacking defense.
+- `Referrer-Policy: strict-origin-when-cross-origin` — limits what's leaked in the `Referer` header on cross-origin navigation.
+- `Content-Security-Policy` — controls allowed content sources, closing off many XSS vectors (see `csp-owasp-server-security.md`).
 
----
+## Operational hardening checklist
 
-### Operational Hardening Checklist
 - Disable SSLv2, SSLv3, TLS 1.0, TLS 1.1.
-- Prefer TLS 1.3, support TLS 1.2 for compatibility.
+- Prefer TLS 1.3; support TLS 1.2 for compatibility.
 - Use modern AEAD ciphers; enable ECDHE for PFS.
-- Use strong keys: RSA 2048+ or ECDSA P‑256/P‑384.
+- Use strong keys: RSA 2048+ or ECDSA P-256/P-384.
 - Enable OCSP stapling.
-- Implement HSTS after verifying HTTPS is stable across your site.
-- Rotate/renew certificates automatically; protect private keys with strict permissions.
-- Consider dual‑stack RSA+ECDSA certs for performance and compatibility.
-- Disable 0‑RTT for state‑changing requests if using HTTP/3.
+- Implement HSTS only after verifying HTTPS is stable site-wide.
+- Automate certificate rotation/renewal; protect private keys with strict file permissions.
+- Consider dual-stack RSA+ECDSA certs for performance and compatibility.
+- Disable 0-RTT for state-changing requests if using HTTP/3/TLS 1.3 early data.
 
----
+## Troubleshooting
 
-### Troubleshooting
-- Handshake failures: check certificate chain (leaf + intermediates), key permissions, hostname mismatch, expired cert.
-- Protocol mismatch: ensure TLS 1.2/1.3 enabled; disable legacy protocols.
-- Cipher mismatch: align server ciphers with client capabilities; use modern policy presets.
-- OCSP issues: enable stapling; verify outbound connectivity to CA OCSP responders.
-- SNI problems: verify the correct `server_name`/`ServerName` vhost is matched.
-- Performance: enable HTTP/2; consider HTTP/3; tune session resumption and TLS ticket keys.
-- Tools: `openssl s_client -connect example.com:443 -servername example.com`, `curl -vkI https://example.com`, `ssllabs.com/ssltest`.
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Handshake failures | Broken certificate chain (missing intermediates), key permission issues, hostname mismatch, expired cert | Bundle the full chain; check file permissions; verify SAN/CN matches; check expiry |
+| Protocol mismatch errors | Client and server don't share a supported TLS version | Ensure TLS 1.2/1.3 enabled server-side; disable legacy protocols |
+| Cipher mismatch | No common cipher suite between client and server | Align server cipher list with client capabilities; use a modern policy preset |
+| OCSP issues | Stapling misconfigured, or outbound connectivity to CA's OCSP responder blocked | Enable/verify stapling; check firewall egress rules |
+| SNI problems | Wrong vhost/server block matched | Verify `server_name`/`ServerName` matches exactly |
+| Slow TLS | Old TLS version, no session resumption, no HTTP/2 | Upgrade to 1.3; enable HTTP/2; tune session resumption and TLS ticket keys |
 
----
+Diagnostic tools:
+```bash
+openssl s_client -connect example.com:443 -servername example.com
+curl -vkI https://example.com
+```
+Plus `ssllabs.com/ssltest` for a full external grade covering protocol support, cipher strength, and certificate chain correctness.
 
-### Common Questions
-- Are SSL and TLS the same? Colloquially yes; technically SSL is obsolete, TLS is modern.
-- Do I need a certificate for HTTPS? Yes—issued by a trusted CA or via ACME (Let’s Encrypt).
-- What about self‑signed certs? Fine for testing; clients will not trust them without pinning.
-- Which validation level should I pick? DV suffices for most; OV/EV for additional org assurance.
-- Is mTLS required? Only if you need strong client auth (APIs, internal services, B2B).
+## Common questions
 
----
+- **Are SSL and TLS the same?** Colloquially yes; technically SSL is obsolete and TLS is the protocol actually in use.
+- **Do I need a certificate for HTTPS?** Yes — issued by a trusted CA or via ACME (Let's Encrypt is free).
+- **What about self-signed certs?** Fine for local testing; browsers/clients won't trust them by default without manual pinning/import.
+- **Which validation level should I pick?** DV is sufficient for most sites and APIs; OV/EV add organizational assurance but not cryptographic strength.
+- **Is mTLS required?** Only when you need strong client authentication — internal service-to-service calls, B2B integrations, zero-trust architectures.
 
-### References
+## Further reading
+- `https.md` — HTTP-layer practicalities: redirects, HSTS rollout, mixed content.
+- `csp-owasp-server-security.md` — Content-Security-Policy directives.
 - TLS 1.3 RFC: `https://www.rfc-editor.org/rfc/rfc8446`
-- Mozilla TLS configuration: `https://mozilla.github.io/server-side-tls/`
-- Let’s Encrypt/ACME: `https://letsencrypt.org/`, `https://certbot.eff.org/`
+- Mozilla TLS configuration generator: `https://mozilla.github.io/server-side-tls/`
+- Let's Encrypt / ACME: `https://letsencrypt.org/`, `https://certbot.eff.org/`
 - OWASP TLS Cheat Sheet: `https://cheatsheetseries.owasp.org/cheatsheets/TLS_Cheat_Sheet.html`
 - SSL Labs test: `https://www.ssllabs.com/ssltest/`
-
-
