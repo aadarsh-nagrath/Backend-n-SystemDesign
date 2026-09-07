@@ -44,6 +44,17 @@ A comprehensive collection of backend development concepts, best practices, and 
 - **System Design Fundamentals** - Scalability, performance, and architecture patterns
 - **Latency vs Throughput** - Performance optimization concepts
 
+## 🎤 Interview Prep (DevOps + Backend + SDE + System Design)
+
+A dedicated, comprehensive Q&A study set lives in [`interview-prep/`](./interview-prep/README.md) — ~575 fully-answered interview questions (junior to senior) plus 12 full system design case-study walkthroughs, covering:
+
+- **DevOps** (`interview-prep/devops/`) — Linux, networking, Git, Docker, Kubernetes, CI/CD, AWS/Azure/GCP, Terraform/Ansible, monitoring, security, SRE/incident management, scripting, and scenario-based troubleshooting.
+- **Backend Engineering** (`interview-prep/backend-engineer/`) — backend fundamentals, API design (REST/GraphQL/gRPC), databases, caching, concurrency, message queues, microservices, auth/security, testing.
+- **System Design** (`interview-prep/system-design/`) — fundamentals, scalability/availability, data storage design, and 12 full case studies (URL shortener, rate limiter, chat app, news feed, notifications, distributed cache, web crawler, video streaming, ride-hailing, unique ID generator, typeahead, e-commerce orders).
+- **SDE General** (`interview-prep/sde-general/`) — DSA concepts, OOP/design patterns, behavioral interview questions.
+
+Start at [`interview-prep/README.md`](./interview-prep/README.md) for the full index and a suggested study order.
+
 ## 🚧 Topics To Be Covered
 
 ### **Core Backend Technologies**
