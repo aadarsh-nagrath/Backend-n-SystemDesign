@@ -599,6 +599,13 @@ body {
 .icon-api, .folder-api { color: #06b6d4 !important; } /* Cyan */
 .icon-server, .folder-server { color: #3b82f6 !important; } /* Royal Blue */
 .icon-git, .folder-git { color: #f05032 !important; } /* Git Orange-red */
+.icon-messaging, .folder-messaging { color: #ec4899 !important; } /* Pink */
+.icon-network, .folder-network { color: #14b8a6 !important; } /* Teal */
+.icon-observability, .folder-observability { color: #84cc16 !important; } /* Lime */
+.icon-testing, .folder-testing { color: #a855f7 !important; } /* Purple */
+.icon-concurrency, .folder-concurrency { color: #f97316 !important; } /* Orange */
+.icon-storage, .folder-storage { color: #64748b !important; } /* Slate */
+.icon-architecture, .folder-architecture { color: #8b5cf6 !important; } /* Violet */
 .icon-index { color: #f59e0b !important; }
 
 /* Icon zoom transitions */

@@ -114,6 +114,8 @@ function handleHashNavigation() {
   const hash = window.location.hash;
   if (hash && hash.startsWith('#')) {
     const targetPath = decodeURIComponent(hash.substring(1));
+    // loadNote() updates the hash itself; don't reload (and lose scroll position) for the note already shown
+    if (targetPath === currentPath) return;
     const matchedNote = allNotes.find(n => n.path === targetPath);
     if (matchedNote) {
       loadNote(matchedNote.path);
@@ -211,6 +213,15 @@ const ICON_RULES = [
   // --- Databases & Scaling ---
   [/scaling.?db|scaling-db|sharding|replication|partitioning|acid/, 'fa-solid fa-chart-line', 'icon-scaling-db'],
   [/database|db|sql|nosql|postgres|mysql|mongodb|cassandra|dynamodb|index/, 'fa-solid fa-database', 'icon-database'],
+
+  // --- Messaging, Networking, Architecture & Operations ---
+  [/messaging|kafka|rabbitmq|event-driven|background-jobs/, 'fa-solid fa-envelopes-bulk', 'icon-messaging'],
+  [/networking|tcp|dns|quic|real-time/, 'fa-solid fa-network-wired', 'icon-network'],
+  [/observability|monitoring|tracing/, 'fa-solid fa-magnifying-glass-chart', 'icon-observability'],
+  [/testing/, 'fa-solid fa-vial', 'icon-testing'],
+  [/concurrency|async-io/, 'fa-solid fa-shuffle', 'icon-concurrency'],
+  [/(^|\/)storage(\/|$)|object-storage/, 'fa-solid fa-box-archive', 'icon-storage'],
+  [/(^|\/)architecture(\/|$)|hexagonal|twelve-factor|monolith/, 'fa-solid fa-sitemap', 'icon-architecture'],
 
   // --- Caching ---
   [/caching|cache|redis|memcached/, 'fa-solid fa-bolt', 'icon-caching'],
@@ -343,8 +354,33 @@ function createTreeNodes(obj, container, autoExpand, parentPath = '') {
   });
 }
 
+// Turn heading text into a URL-friendly anchor id
+function slugifyHeading(text) {
+  return text.toLowerCase().trim()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/\s+/g, '-');
+}
+
+// Scroll the viewer to an in-note anchor (heading id)
+function scrollToAnchor(anchor) {
+  if (!anchor) return;
+  const target = document.getElementById(decodeURIComponent(anchor));
+  if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 // Post process note content to rewrite images and embed video link players
 function postProcessNoteContent(container, notePath) {
+  // 0. Heading anchors: honor explicit "{#id}" suffixes, otherwise derive a slug
+  container.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach(heading => {
+    const explicit = heading.innerHTML.match(/\s*\{#([\w-]+)\}\s*$/);
+    if (explicit) {
+      heading.id = explicit[1];
+      heading.innerHTML = heading.innerHTML.replace(explicit[0], '');
+    } else if (!heading.id) {
+      heading.id = slugifyHeading(heading.textContent);
+    }
+  });
+
   // 1. Process Images
   const images = container.querySelectorAll('img');
   const noteDir = notePath.includes('/') ? notePath.substring(0, notePath.lastIndexOf('/')) : '';
@@ -378,9 +414,19 @@ function postProcessNoteContent(container, notePath) {
       return;
     }
 
-    // 2b. Intercept relative internal .md links — navigate inside viewer
-    if (!href.startsWith('http://') && !href.startsWith('https://') && !href.startsWith('#')) {
-      const decodedHref = decodeURIComponent(href);
+    // 2b. In-note anchor links (table of contents) — scroll instead of changing the route hash
+    if (href.startsWith('#')) {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        scrollToAnchor(href.substring(1));
+      });
+      return;
+    }
+
+    // 2c. Intercept relative internal .md links — navigate inside viewer
+    if (!href.startsWith('http://') && !href.startsWith('https://')) {
+      const [hrefPath, anchor] = href.split('#');
+      const decodedHref = decodeURIComponent(hrefPath);
       // Resolve relative to note directory
       let resolvedPath;
       if (noteDir) {
@@ -396,13 +442,17 @@ function postProcessNoteContent(container, notePath) {
         resolvedPath = decodedHref;
       }
 
-      // Check if it matches a known note
-      const matchedNote = allNotes.find(n => n.path === resolvedPath || n.path.replace(/\\/g, '/') === resolvedPath);
+      // Check if it matches a known note (folder links open that folder's README.md)
+      const folderReadme = `${resolvedPath.replace(/\/$/, '')}/README.md`;
+      const matchedNote = allNotes.find(n => {
+        const p = n.path.replace(/\\/g, '/');
+        return p === resolvedPath || p === folderReadme;
+      });
       if (matchedNote) {
         link.setAttribute('href', `#${encodeURIComponent(matchedNote.path)}`);
         link.addEventListener('click', (e) => {
           e.preventDefault();
-          loadNote(matchedNote.path);
+          loadNote(matchedNote.path).then(() => scrollToAnchor(anchor));
         });
       }
     }
