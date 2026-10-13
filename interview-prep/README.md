@@ -51,6 +51,7 @@ Don't try to memorize answers verbatim — read a file, then close it and explai
 | `11-nodejs-specific-questions.md` ✨ | Event loop phases, libuv, EventEmitter, streams/Buffer, cluster module, Express middleware |
 | `12-python-specific-questions.md` ✨ | GIL, decorators, generators, mutable-default-argument gotcha, pickling security, duck typing |
 | `13-java-spring-boot-questions.md` ✨ | JVM/GC, IoC/DI, @SpringBootApplication internals, Spring Data JPA, Actuator, Spring Security |
+| `14-java-spring-microservices-round-questions.md` | Real interview loop: HashMap internals, sliding window, Floyd cycle detection, JMM/shared state, equals/hashCode, `@Transactional` internals + self-invocation, downstream failure handling, slow-API troubleshooting |
 
 ## 3. System Design (`system-design/`) — ~40 questions + 20 case studies
 
@@ -62,6 +63,7 @@ Don't try to memorize answers verbatim — read a file, then close it and explai
 | `04-case-studies-walkthroughs.md` | **12 full designs**: URL shortener, rate limiter, chat app, news feed, notifications, distributed cache, web crawler, video streaming, ride-hailing, unique ID generator, typeahead/autocomplete, e-commerce orders |
 | `05-more-popular-case-studies.md` ✨ | **6 more full designs**: Google Docs (OT/CRDTs), Dropbox (chunking/dedup), Ticketmaster (seat locking), Stripe-like payments, Airbnb (marketplace), Zoom (SFU vs MCU) |
 | `06-cdn-and-job-scheduler.md` ✨ | **2 deep-dive designs** in full interview format (requirements → estimation → API → data model → HLD → deep dives → failure modes → tradeoffs → follow-ups): CDN, Distributed Job Scheduler |
+| `07-payments-consistency-and-concurrency-at-scale.md` | Full-format answers: HA payment system without duplicate charges, cross-service consistency without 2PC (outbox/saga/inbox), JVM memory leak + thread-pool exhaustion troubleshooting, handling thousands of concurrent requests |
 
 ## 4. SDE General (`sde-general/`) — ~100 questions
 
