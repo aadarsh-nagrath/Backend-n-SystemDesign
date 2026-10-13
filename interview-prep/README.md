@@ -2,7 +2,7 @@
 
 A comprehensive, self-contained Q&A study set for backend/DevOps engineering interviews — junior through senior — plus general SDE and system design rounds. Every question has a full written answer (not just a one-liner), researched against current industry-standard practice and cross-referenced across files where topics overlap.
 
-**~800+ individual Q&A entries + 18 full system design case-study walkthroughs**, organized into 42 topic files across 4 sections. A second research pass (see "Round 2" below) added tool-specific and language-specific content sourced directly from the most popular interview-question blogs and aggregators (GeeksforGeeks, InterviewBit, KodeKloud, igmGuru, DesignGurus, DataCamp, Tecmint), cross-checked against the existing conceptual coverage to avoid duplication.
+**~800+ individual Q&A entries + 20 full system design case-study walkthroughs**, organized into 42 topic files across 4 sections. A second research pass (see "Round 2" below) added tool-specific and language-specific content sourced directly from the most popular interview-question blogs and aggregators (GeeksforGeeks, InterviewBit, KodeKloud, igmGuru, DesignGurus, DataCamp, Tecmint), cross-checked against the existing conceptual coverage to avoid duplication.
 
 ## How to use this
 
@@ -52,7 +52,7 @@ Don't try to memorize answers verbatim — read a file, then close it and explai
 | `12-python-specific-questions.md` ✨ | GIL, decorators, generators, mutable-default-argument gotcha, pickling security, duck typing |
 | `13-java-spring-boot-questions.md` ✨ | JVM/GC, IoC/DI, @SpringBootApplication internals, Spring Data JPA, Actuator, Spring Security |
 
-## 3. System Design (`system-design/`) — ~40 questions + 18 case studies
+## 3. System Design (`system-design/`) — ~40 questions + 20 case studies
 
 | File | Topic |
 |---|---|
@@ -61,6 +61,7 @@ Don't try to memorize answers verbatim — read a file, then close it and explai
 | `03-data-storage-design.md` | Sharding strategy, CDC, time-series storage, global uniqueness at scale |
 | `04-case-studies-walkthroughs.md` | **12 full designs**: URL shortener, rate limiter, chat app, news feed, notifications, distributed cache, web crawler, video streaming, ride-hailing, unique ID generator, typeahead/autocomplete, e-commerce orders |
 | `05-more-popular-case-studies.md` ✨ | **6 more full designs**: Google Docs (OT/CRDTs), Dropbox (chunking/dedup), Ticketmaster (seat locking), Stripe-like payments, Airbnb (marketplace), Zoom (SFU vs MCU) |
+| `06-cdn-and-job-scheduler.md` ✨ | **2 deep-dive designs** in full interview format (requirements → estimation → API → data model → HLD → deep dives → failure modes → tradeoffs → follow-ups): CDN, Distributed Job Scheduler |
 
 ## 4. SDE General (`sde-general/`) — ~100 questions
 
